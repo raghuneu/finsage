@@ -5,6 +5,35 @@ import pandas as pd
 from datetime import datetime
 from snowflake_connection import get_session
 
+def validate_prices(df):
+    if (df['open'] < 0).any() or (df['high'] < 0).any() or (df['low'] < 0).any() or (df['close'] < 0).any():
+        raise ValueError("Price columns cannot have negative values.")
+    if (df['high'] < df['low']).any():
+        raise ValueError("High price cannot be less than low price.")
+    if (df['open'] < df['low']).any() or (df['open'] > df['high']).any():
+        raise ValueError("Open price must be between low and high.")
+    if (df['close'] < df['low']).any() or (df['close'] > df['high']).any():
+        raise ValueError("Close price must be between low and high.")
+    print("Price validation passed.")
+
+def calculate_quality_score(df):
+    """Calculate data quality score (0-100)"""
+    score = 100.0
+    
+    # Deduct points for issues
+    if (df['high'] < df['low']).any():
+        score -= 20
+    if (df['open'] < df['low']).any() or (df['open'] > df['high']).any():
+        score -= 10
+    if (df['close'] < df['low']).any() or (df['close'] > df['high']).any():
+        score -= 10
+    if df[['open', 'high', 'low', 'close']].isnull().any().any():
+        score -= 30
+        
+    return score
+
+
+
 # Fetch stock data
 ticker_symbol = "AAPL"
 ticker = yf.Ticker(ticker_symbol)
@@ -30,7 +59,10 @@ hist = hist.rename(columns={
 
 # Select only needed columns
 df = hist[['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 
-           'dividends', 'stock_splits', 'source', 'ingested_at']]
+           'dividends', 'stock_splits', 'source', 'ingested_at']].copy()
+validate_prices(df)
+df['data_quality_score'] = calculate_quality_score(df)
+
 
 # Load to Snowflake
 session = get_session()
@@ -64,14 +96,18 @@ WHEN MATCHED THEN
         VOLUME = source.VOLUME,
         DIVIDENDS = source.DIVIDENDS,
         STOCK_SPLITS = source.STOCK_SPLITS,
-        INGESTED_AT = source.INGESTED_AT
+        INGESTED_AT = source.INGESTED_AT,
+        DATA_QUALITY_SCORE = source.DATA_QUALITY_SCORE
 WHEN NOT MATCHED THEN
-    INSERT (TICKER, DATE, OPEN, HIGH, LOW, CLOSE, VOLUME, DIVIDENDS, STOCK_SPLITS, SOURCE, INGESTED_AT)
+    INSERT (TICKER, DATE, OPEN, HIGH, LOW, CLOSE, VOLUME, DIVIDENDS, STOCK_SPLITS, SOURCE, INGESTED_AT, DATA_QUALITY_SCORE)
     VALUES (source.TICKER, source.DATE, source.OPEN, source.HIGH, source.LOW, source.CLOSE, 
-            source.VOLUME, source.DIVIDENDS, source.STOCK_SPLITS, source.SOURCE, source.INGESTED_AT)
+            source.VOLUME, source.DIVIDENDS, source.STOCK_SPLITS, source.SOURCE, source.INGESTED_AT, source.DATA_QUALITY_SCORE)
 """
 
 session.sql(merge_sql).collect()
 print(f"✅ Merged {len(df)} rows for {ticker_symbol}")
+
+result = session.sql("SELECT TICKER, DATE, CLOSE, DATA_QUALITY_SCORE FROM RAW.RAW_STOCK_PRICES LIMIT 3").collect()
+
 
 session.close()
