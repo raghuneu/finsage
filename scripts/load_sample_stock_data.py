@@ -32,12 +32,36 @@ def calculate_quality_score(df):
         
     return score
 
+def get_last_loaded_date(session, ticker):
+    """Get the most recent date we have data for"""
+    result = session.sql(f"""
+        SELECT MAX(DATE) as last_date 
+        FROM RAW.RAW_STOCK_PRICES 
+        WHERE TICKER = '{ticker}'
+    """).collect()
+    
+    if result and result[0]['LAST_DATE']:
+        return result[0]['LAST_DATE']
+    return None
 
 
 # Fetch stock data
 ticker_symbol = "AAPL"
 ticker = yf.Ticker(ticker_symbol)
-hist = ticker.history(period="1mo")
+
+# Load to Snowflake
+session = get_session()
+
+last_date = get_last_loaded_date(session, ticker_symbol)
+
+if last_date:
+    # Incremental: fetch only new data
+    print(f"Last loaded date: {last_date}, fetching incremental data...")
+    hist = ticker.history(start=last_date)
+else:
+    # Initial load: fetch full history
+    print("No existing data, fetching full history...")
+    hist = ticker.history(period="2y")  # 2 years for initial load
 
 # Prepare data for Snowflake
 hist = hist.reset_index()
@@ -63,9 +87,6 @@ df = hist[['ticker', 'date', 'open', 'high', 'low', 'close', 'volume',
 validate_prices(df)
 df['data_quality_score'] = calculate_quality_score(df)
 
-
-# Load to Snowflake
-session = get_session()
 
 result = session.sql("SELECT COUNT(*) as cnt FROM RAW.RAW_STOCK_PRICES").collect()
 print(f"Row count: {result[0]['CNT']}")
