@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: raw
+    database: finsage_db
+    schema: raw
+    tables:
+      - name: raw_stock_prices
+      - name: raw_fundamentals
+      - name: raw_news
+
+models:
+  - name: stg_stock_prices
+    description: "Cleaned and validated stock price data"
+    columns:
+      - name: ticker
+        description: "Stock ticker symbol"
+        tests:
+          - not_null
+      - name: date
+        description: "Trading date"
+        tests:
+          - not_null
+      - name: close
+        description: "Closing price"
+        tests:
+          - not_null
+      - name: is_valid
+        description: "Data quality validation flag"
