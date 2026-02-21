@@ -1,4 +1,4 @@
-"""Stock price loader - refactored from your script"""
+"""Stock price loader - refactored from load_sample_stock_data.py"""
 
 import yfinance as yf
 import pandas as pd
@@ -8,10 +8,13 @@ class StockPriceLoader(BaseDataLoader):
     """Load stock prices from Yahoo Finance"""
 
     def fetch_data(self, ticker: str, **kwargs) -> pd.DataFrame:
-        """Fetch stock data from Yahoo Finance"""
-        # Check for incremental load
+        """
+        Fetch stock data with incremental loading
+        Uses your exact pattern from original script
+        """
+        # Check for existing data (your incremental pattern)
         last_date = self.sf_client.get_last_loaded_date(
-            'RAW.RAW_STOCK_PRICES', ticker
+            'RAW.RAW_STOCK_PRICES', ticker, 'DATE'
         )
 
         yf_ticker = yf.Ticker(ticker)
@@ -26,7 +29,7 @@ class StockPriceLoader(BaseDataLoader):
         if hist.empty:
             return pd.DataFrame()
 
-        # Reset index and prepare
+        # Prepare data (your exact column mapping)
         hist = hist.reset_index()
         hist = hist.rename(columns={
             'Date': 'date',
@@ -41,29 +44,42 @@ class StockPriceLoader(BaseDataLoader):
 
         hist['source'] = 'yahoo_finance'
 
-        return hist[['date', 'open', 'high', 'low', 'close', 'volume',
-                     'dividends', 'stock_splits', 'source']]
+        # Select columns in your order
+        df = hist[['date', 'open', 'high', 'low', 'close', 'volume',
+                   'dividends', 'stock_splits', 'source']].copy()
+
+        # Format dates (your pattern)
+        df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None).dt.strftime('%Y-%m-%d')
+
+        return df
 
     def validate_data(self, df: pd.DataFrame) -> bool:
-        """Validate price data"""
-        # Your existing validation logic
-        if (df['open'] < 0).any() or (df['high'] < 0).any():
-            raise ValueError("Prices cannot be negative")
+        """Your exact validation logic"""
+        # Check for negative prices
+        if (df['open'] < 0).any() or (df['high'] < 0).any() or \
+                (df['low'] < 0).any() or (df['close'] < 0).any():
+            raise ValueError("Price columns cannot have negative values")
+
+        # High >= Low
         if (df['high'] < df['low']).any():
-            raise ValueError("High < Low detected")
+            raise ValueError("High price cannot be less than low price")
+
+        # Open within range
         if (df['open'] < df['low']).any() or (df['open'] > df['high']).any():
-            raise ValueError("Open price out of range")
+            raise ValueError("Open price must be between low and high")
+
+        # Close within range
         if (df['close'] < df['low']).any() or (df['close'] > df['high']).any():
-            raise ValueError("Close price out of range")
+            raise ValueError("Close price must be between low and high")
 
         self.logger.info("✓ Price validation passed")
         return True
 
     def calculate_quality_score(self, df: pd.DataFrame) -> float:
-        """Calculate quality score"""
+        """Your exact quality scoring logic"""
         score = 100.0
 
-        # Deduct for issues
+        # Deduct points for issues
         if (df['high'] < df['low']).any():
             score -= 20
         if (df['open'] < df['low']).any() or (df['open'] > df['high']).any():
@@ -78,19 +94,12 @@ class StockPriceLoader(BaseDataLoader):
     def get_target_table(self) -> str:
         return 'RAW.RAW_STOCK_PRICES'
 
-    def _load_to_snowflake(self, df: pd.DataFrame):
-        """Load using MERGE pattern"""
-        # Format dates
-        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
-        df['ingested_at'] = pd.to_datetime(df['ingested_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+    def get_merge_keys(self) -> list:
+        return ['TICKER', 'DATE']
 
-        # Merge
-        self.sf_client.merge_data(
-            df=df,
-            target_table='RAW.RAW_STOCK_PRICES',
-            staging_table='TEMP_STOCK_STAGING',
-            match_keys=['TICKER', 'DATE'],
-            update_columns=['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME',
-                            'DIVIDENDS', 'STOCK_SPLITS', 'INGESTED_AT',
-                            'DATA_QUALITY_SCORE']
-        )
+    def transform_data(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """Add ticker and timestamp (your pattern)"""
+        df = super().transform_data(df, ticker)
+        # Format timestamp
+        df['ingested_at'] = pd.to_datetime(df['ingested_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        return df

@@ -1,26 +1,35 @@
-# Companies to track
+# FinSage - Companies to Track
+# Edit this list to add/remove stocks
+
 tickers:
-  # Technology
-  - AAPL
-  - MSFT
-  - GOOGL
-  - AMZN
-  - NVDA
-  - META
-  - TSLA
+  # Technology (Large Cap)
+  - AAPL   # Apple
+  - MSFT   # Microsoft
+  - GOOGL  # Alphabet
+  - AMZN   # Amazon
+  - NVDA   # NVIDIA
+  - META   # Meta
+  - TSLA   # Tesla
 
   # Finance
-  - JPM
-  - BAC
-  - WFC
-  - GS
+  - JPM    # JPMorgan Chase
+  - BAC    # Bank of America
+  - WFC    # Wells Fargo
+  - GS     # Goldman Sachs
 
   # Healthcare
-  - UNH
-  - JNJ
-  - PFE
+  - UNH    # UnitedHealth
+  - JNJ    # Johnson & Johnson
+  - PFE    # Pfizer
 
   # Consumer
-  - WMT
-  - HD
-  - KO
+  - WMT    # Walmart
+  - HD     # Home Depot
+  - KO     # Coca-Cola
+
+  # Energy
+  - XOM    # Exxon Mobil
+  - CVX    # Chevron
+
+# Add more as needed - just keep the format:
+# - TICKER  # Company Name (optional comment)
