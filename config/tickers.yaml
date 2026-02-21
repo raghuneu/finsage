@@ -1,0 +1,26 @@
+# Companies to track
+tickers:
+  # Technology
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - NVDA
+  - META
+  - TSLA
+
+  # Finance
+  - JPM
+  - BAC
+  - WFC
+  - GS
+
+  # Healthcare
+  - UNH
+  - JNJ
+  - PFE
+
+  # Consumer
+  - WMT
+  - HD
+  - KO
