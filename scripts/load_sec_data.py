@@ -27,7 +27,7 @@ KEY_CONCEPTS = [
     'ResearchAndDevelopmentExpense'
 ]
 
-HEADERS = {"User-Agent": "finsage your-email@northeastern.edu"}
+HEADERS = {"User-Agent": "finsage testemail@northeastern.edu"}
 
 def get_last_loaded_date(session, ticker):
     """Get most recent filing date for incremental loading"""

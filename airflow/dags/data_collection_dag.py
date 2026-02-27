@@ -4,9 +4,14 @@ Runs daily at 5 PM EST after market close
 """
 
 from datetime import datetime, timedelta
+import subprocess
+import sys
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+
+SCRIPTS_DIR = "/opt/airflow/scripts"
+PYTHON = sys.executable  # uses Airflow's own Python interpreter
 
 # Default arguments for all tasks
 default_args = {
@@ -29,25 +34,34 @@ dag = DAG(
     tags=['finsage', 'data-collection'],
 )
 
-# Task 1: Fetch stock prices
+def run_script(script_name):
+    """Helper to run a script and raise on failure."""
+    result = subprocess.run(
+        [PYTHON, f"{SCRIPTS_DIR}/{script_name}"],
+        capture_output=True,
+        text=True
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        raise Exception(f"{script_name} failed with return code {result.returncode}")
+    print(f"{script_name} completed successfully!")
+
 def fetch_stock_prices():
-    print("Fetching stock prices from Yahoo Finance...")
-    # We'll connect actual script later
-    print("Stock prices fetched successfully!")
+    run_script("load_sample_stock_data.py")
 
-# Task 2: Fetch fundamentals
 def fetch_fundamentals():
-    print("Fetching fundamentals from Yahoo Finance...")
-    print("Fundamentals fetched successfully!")
+    run_script("load_sample_fundamentals.py")
 
-# Task 3: Fetch news
 def fetch_news():
-    print("Fetching news from NewsAPI...")
-    print("News fetched successfully!")
+    run_script("load_sample_news.py")
 
-# Task 4: Data quality check
+def fetch_sec_data():
+    run_script("load_sec_data.py")
+
 def data_quality_check():
     print("Running data quality checks...")
+    # Placeholder — will wire to real checks in analytics layer
     print("Data quality checks passed!")
 
 # Define tasks
@@ -69,7 +83,12 @@ task_fetch_news = PythonOperator(
     dag=dag,
 )
 
-# Task 5: Run dbt transformations
+task_fetch_sec = PythonOperator(
+    task_id='fetch_sec_data',
+    python_callable=fetch_sec_data,
+    dag=dag,
+)
+
 task_run_dbt = BashOperator(
     task_id='run_dbt_transformations',
     bash_command='echo "dbt run --select staging"',
@@ -83,6 +102,6 @@ task_quality_check = PythonOperator(
 )
 
 # Define task dependencies
-# fetch_stocks, fetch_fundamentals, fetch_news run in PARALLEL
+# fetch_stocks, fetch_fundamentals, fetch_news, task_fetch_sec run in PARALLEL
 # then dbt runs, then quality check
-[task_fetch_stocks, task_fetch_fundamentals, task_fetch_news] >> task_run_dbt >> task_quality_check
+[task_fetch_stocks, task_fetch_fundamentals, task_fetch_news, task_fetch_sec] >> task_run_dbt >> task_quality_check
