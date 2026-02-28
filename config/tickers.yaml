@@ -6,30 +6,30 @@ tickers:
   - AAPL   # Apple
   - MSFT   # Microsoft
   - GOOGL  # Alphabet
-  - AMZN   # Amazon
-  - NVDA   # NVIDIA
-  - META   # Meta
-  - TSLA   # Tesla
-
-  # Finance
-  - JPM    # JPMorgan Chase
-  - BAC    # Bank of America
-  - WFC    # Wells Fargo
-  - GS     # Goldman Sachs
-
-  # Healthcare
-  - UNH    # UnitedHealth
-  - JNJ    # Johnson & Johnson
-  - PFE    # Pfizer
-
-  # Consumer
-  - WMT    # Walmart
-  - HD     # Home Depot
-  - KO     # Coca-Cola
-
-  # Energy
-  - XOM    # Exxon Mobil
-  - CVX    # Chevron
+#  - AMZN   # Amazon
+#  - NVDA   # NVIDIA
+#  - META   # Meta
+#  - TSLA   # Tesla
+#
+#  # Finance
+#  - JPM    # JPMorgan Chase
+#  - BAC    # Bank of America
+#  - WFC    # Wells Fargo
+#  - GS     # Goldman Sachs
+#
+#  # Healthcare
+#  - UNH    # UnitedHealth
+#  - JNJ    # Johnson & Johnson
+#  - PFE    # Pfizer
+#
+#  # Consumer
+#  - WMT    # Walmart
+#  - HD     # Home Depot
+#  - KO     # Coca-Cola
+#
+#  # Energy
+#  - XOM    # Exxon Mobil
+#  - CVX    # Chevron
 
 # Add more as needed - just keep the format:
 # - TICKER  # Company Name (optional comment)

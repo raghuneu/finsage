@@ -28,7 +28,7 @@ def load_tickers():
 
     if not config_path.exists():
         logger.warning(f"Config file not found at {config_path}, using defaults")
-        return ['AAPL', 'MSFT', 'GOOGL']
+        return ['AAPL', 'MSFT', 'GOOGL']  # Only fallback if no config
 
     with open(config_path) as f:
         config = yaml.safe_load(f)

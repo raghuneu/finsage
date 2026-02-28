@@ -1,19 +1,14 @@
-"""Logging configuration for FinSage"""
+"""Logging configuration for FinSage - Windows compatible"""
 
 import logging
 import colorlog
 from pathlib import Path
+import sys
 
 def setup_logger(name: str, log_file: str = None) -> logging.Logger:
     """
     Create a logger with color output and file logging
-
-    Args:
-        name: Logger name (usually __name__)
-        log_file: Optional log file path
-
-    Returns:
-        Configured logger instance
+    WINDOWS COMPATIBLE - handles emoji encoding issues
     """
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
@@ -22,9 +17,14 @@ def setup_logger(name: str, log_file: str = None) -> logging.Logger:
     if logger.handlers:
         return logger
 
-    # Console handler with colors
-    console_handler = colorlog.StreamHandler()
+    # Console handler with colors and UTF-8 encoding
+    console_handler = colorlog.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
+
+    # Set UTF-8 encoding for console (fixes emoji issue on Windows)
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+
     console_formatter = colorlog.ColoredFormatter(
         '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
@@ -39,12 +39,12 @@ def setup_logger(name: str, log_file: str = None) -> logging.Logger:
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
-    # File handler (if specified)
+    # File handler with UTF-8 encoding
     if log_file:
         log_path = Path('logs') / log_file
         log_path.parent.mkdir(exist_ok=True)
 
-        file_handler = logging.FileHandler(log_path)
+        file_handler = logging.FileHandler(log_path, encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         file_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',

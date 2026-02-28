@@ -17,19 +17,26 @@ class SnowflakeClient:
         self._connect()
 
     def _connect(self):
+
         """Create Snowflake session using environment variables"""
         connection_params = {
-            "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-            "user": os.getenv("SNOWFLAKE_USER"),
-            "password": os.getenv("SNOWFLAKE_PASSWORD"),
-            "role": os.getenv("SNOWFLAKE_ROLE"),
-            "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-            "database": os.getenv("SNOWFLAKE_DATABASE"),
-            "schema": os.getenv("SNOWFLAKE_SCHEMA"),
-        }
+        "account": os.getenv("SNOWFLAKE_ACCOUNT"),
+        "user": os.getenv("SNOWFLAKE_USER"),
+        "password": os.getenv("SNOWFLAKE_PASSWORD"),
+        "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
+        "database": os.getenv("SNOWFLAKE_DATABASE"),
+        "schema": os.getenv("SNOWFLAKE_SCHEMA"),
+    }
 
-        # Validate required params
-        missing = [k for k, v in connection_params.items() if not v]
+        # Only add role if it's set in .env
+        role = os.getenv("SNOWFLAKE_ROLE")
+        if role:
+            connection_params["role"] = role
+
+        # Validate required params (role is optional)
+        required = ["account", "user", "password", "warehouse", "database", "schema"]
+        missing = [k for k in required if not connection_params.get(k)]
+
         if missing:
             raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
