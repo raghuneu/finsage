@@ -7,4 +7,8 @@ __pycache__/
 .DS_Store
 *.db
 
-rough.py
+airflow/logs/
+airflow/.env
+airflow/plugins/
+
+ignoreFiles/

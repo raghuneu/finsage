@@ -8,6 +8,7 @@ sources:
       - name: raw_stock_prices
       - name: raw_fundamentals
       - name: raw_news
+      - name: raw_sec_filings
 
 models:
   - name: stg_stock_prices
