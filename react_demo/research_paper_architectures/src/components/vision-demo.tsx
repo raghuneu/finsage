@@ -77,7 +77,7 @@ const MOCK: { config: ChartConfig; critique: string }[] = [
   },
   {
     config: {
-      title: "AAPL Weekly Price & Volume (Jan–Mar 2025)",
+      title: "AAPL Weekly Price & Volume (Jan-Mar 2025)",
       series: [
         {
           key: "close",
