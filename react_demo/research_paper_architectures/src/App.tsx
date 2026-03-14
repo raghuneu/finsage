@@ -62,11 +62,6 @@ export default function App() {
   if (!started) {
     return (
       <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center px-4">
-        {/* Badge */}
-        <div className="mb-6 px-3 py-1 rounded-full border border-gray-700 bg-gray-900 text-xs text-gray-400 tracking-widest uppercase">
-          DAMG 7374 · Northeastern University · Fall 2025
-        </div>
-
         {/* Title */}
         <h1 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight mb-3">
           <span className="text-white">Fin</span>
