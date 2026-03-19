@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: fct_stock_metrics
+    description: "Daily stock price metrics with rolling averages, volatility, and trend signals"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: date
+        tests:
+          - not_null
+      - name: close
+        tests:
+          - not_null
