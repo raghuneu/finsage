@@ -13,3 +13,15 @@ models:
       - name: close
         tests:
           - not_null
+  - name: fct_fundamentals_growth
+    description: "Quarterly fundamentals with QoQ and YoY growth rates and health signals"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: fiscal_quarter
+        tests:
+          - not_null
+      - name: revenue
+        tests:
+          - not_null
