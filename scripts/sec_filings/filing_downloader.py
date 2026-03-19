@@ -44,10 +44,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # SEC EDGAR requires a User-Agent with company name and email
-SEC_USER_AGENT = os.getenv(
-    "SEC_USER_AGENT",
-    "FinSage NEU vedanarayanan.s@northeastern.edu"
-)
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "FinSage NEU")
 
 HEADERS = {
     "User-Agent": SEC_USER_AGENT,
