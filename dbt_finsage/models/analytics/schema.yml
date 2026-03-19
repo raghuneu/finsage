@@ -25,3 +25,12 @@ models:
       - name: revenue
         tests:
           - not_null
+  - name: fct_news_sentiment_agg
+    description: "Daily aggregated news sentiment per ticker with rolling averages and trend signals"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: news_date
+        tests:
+          - not_null
