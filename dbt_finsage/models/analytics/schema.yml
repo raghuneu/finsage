@@ -46,3 +46,10 @@ models:
       - name: fiscal_period
         tests:
           - not_null
+  - name: dim_company
+    description: "Company dimension table with one row per ticker and descriptive attributes"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+          - unique
