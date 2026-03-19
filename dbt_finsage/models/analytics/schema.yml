@@ -34,3 +34,15 @@ models:
       - name: news_date
         tests:
           - not_null
+  - name: fct_sec_financial_summary
+    description: "Pivoted SEC XBRL data with one row per ticker/period and derived financial ratios"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: fiscal_year
+        tests:
+          - not_null
+      - name: fiscal_period
+        tests:
+          - not_null
