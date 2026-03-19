@@ -245,42 +245,75 @@ def update_extraction_metadata(session, filing_id: str, ticker: str,
                                 s3_mda_key: str, s3_risk_key: str,
                                 quality_score: float,
                                 error: str = None):
-    """Update the filing document record with extraction results."""
+    """Update the filing document record with extraction results using MERGE."""
 
     mda_word_count = len(mda_text.split()) if mda_text else 0
     risk_word_count = len(risk_text.split()) if risk_text else 0
     status = "extracted" if (mda_text or risk_text) else "failed"
 
-    # Escape single quotes in text for SQL
-    mda_escaped = mda_text.replace("'", "''") if mda_text else ""
-    risk_escaped = risk_text.replace("'", "''") if risk_text else ""
-    error_escaped = error.replace("'", "''") if error else ""
-
     # Truncate text if extremely long (Snowflake TEXT max = 16MB, but keep reasonable)
     max_text_len = 2_000_000  # 2M chars
-    if len(mda_escaped) > max_text_len:
-        mda_escaped = mda_escaped[:max_text_len]
+    if mda_text and len(mda_text) > max_text_len:
+        mda_text = mda_text[:max_text_len]
         logger.warning("Truncated MD&A text for %s/%s to %d chars", ticker, filing_id, max_text_len)
-    if len(risk_escaped) > max_text_len:
-        risk_escaped = risk_escaped[:max_text_len]
+    if risk_text and len(risk_text) > max_text_len:
+        risk_text = risk_text[:max_text_len]
 
-    update_sql = f"""
-    UPDATE RAW.RAW_SEC_FILING_DOCUMENTS
-    SET
-        MDA_TEXT = '{mda_escaped}',
-        RISK_FACTORS_TEXT = '{risk_escaped}',
-        MDA_WORD_COUNT = {mda_word_count},
-        RISK_WORD_COUNT = {risk_word_count},
-        S3_MDA_KEY = '{s3_mda_key or ""}',
-        S3_RISK_KEY = '{s3_risk_key or ""}',
-        EXTRACTION_STATUS = '{status}',
-        EXTRACTION_ERROR = '{error_escaped}',
-        DATA_QUALITY_SCORE = {quality_score},
-        UPDATED_AT = CURRENT_TIMESTAMP()
-    WHERE FILING_ID = '{filing_id}' AND TICKER = '{ticker}'
+    # Build a single-row DataFrame and use temp table + MERGE (safe from injection)
+    record = {
+        "filing_id": filing_id,
+        "ticker": ticker,
+        "mda_text": mda_text or "",
+        "risk_factors_text": risk_text or "",
+        "mda_word_count": mda_word_count,
+        "risk_word_count": risk_word_count,
+        "s3_mda_key": s3_mda_key or "",
+        "s3_risk_key": s3_risk_key or "",
+        "extraction_status": status,
+        "extraction_error": error or "",
+        "data_quality_score": quality_score,
+    }
+
+    df = pd.DataFrame([record])
+    df.columns = df.columns.str.upper()
+
+    session.sql("""
+        CREATE TEMPORARY TABLE IF NOT EXISTS TEMP_EXTRACTION_UPDATE (
+            FILING_ID VARCHAR(100),
+            TICKER VARCHAR(10),
+            MDA_TEXT TEXT,
+            RISK_FACTORS_TEXT TEXT,
+            MDA_WORD_COUNT INTEGER,
+            RISK_WORD_COUNT INTEGER,
+            S3_MDA_KEY VARCHAR(500),
+            S3_RISK_KEY VARCHAR(500),
+            EXTRACTION_STATUS VARCHAR(20),
+            EXTRACTION_ERROR TEXT,
+            DATA_QUALITY_SCORE FLOAT
+        )
+    """).collect()
+
+    session.write_pandas(df, "TEMP_EXTRACTION_UPDATE", auto_create_table=False, overwrite=True)
+
+    merge_sql = """
+    MERGE INTO RAW.RAW_SEC_FILING_DOCUMENTS target
+    USING TEMP_EXTRACTION_UPDATE source
+    ON target.FILING_ID = source.FILING_ID AND target.TICKER = source.TICKER
+    WHEN MATCHED THEN
+        UPDATE SET
+            MDA_TEXT = source.MDA_TEXT,
+            RISK_FACTORS_TEXT = source.RISK_FACTORS_TEXT,
+            MDA_WORD_COUNT = source.MDA_WORD_COUNT,
+            RISK_WORD_COUNT = source.RISK_WORD_COUNT,
+            S3_MDA_KEY = source.S3_MDA_KEY,
+            S3_RISK_KEY = source.S3_RISK_KEY,
+            EXTRACTION_STATUS = source.EXTRACTION_STATUS,
+            EXTRACTION_ERROR = source.EXTRACTION_ERROR,
+            DATA_QUALITY_SCORE = source.DATA_QUALITY_SCORE,
+            UPDATED_AT = CURRENT_TIMESTAMP()
     """
 
-    session.sql(update_sql).collect()
+    session.sql(merge_sql).collect()
     logger.info("Updated extraction metadata for %s/%s (status=%s, quality=%.0f)",
                 ticker, filing_id, status, quality_score)
 

@@ -1,7 +1,8 @@
 """Run migration 07: Create SEC filing documents table"""
 
+import os
 import sys
-sys.path.insert(0, ".")
+sys.path.insert(0, os.path.dirname(__file__))
 from snowflake_connection import get_session
 
 
