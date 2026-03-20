@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: fct_stock_metrics
+    description: "Daily stock price metrics with rolling averages, volatility, and trend signals"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: date
+        tests:
+          - not_null
+      - name: close
+        tests:
+          - not_null
+  - name: fct_fundamentals_growth
+    description: "Quarterly fundamentals with QoQ and YoY growth rates and health signals"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: fiscal_quarter
+        tests:
+          - not_null
+      - name: revenue
+        tests:
+          - not_null
+  - name: fct_news_sentiment_agg
+    description: "Daily aggregated news sentiment per ticker with rolling averages and trend signals"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: news_date
+        tests:
+          - not_null
+  - name: fct_sec_financial_summary
+    description: "Pivoted SEC XBRL data with one row per ticker/period and derived financial ratios"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+      - name: fiscal_year
+        tests:
+          - not_null
+      - name: fiscal_period
+        tests:
+          - not_null
+  - name: dim_company
+    description: "Company dimension table with one row per ticker and descriptive attributes"
+    columns:
+      - name: ticker
+        tests:
+          - not_null
+          - unique

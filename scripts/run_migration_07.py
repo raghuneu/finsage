@@ -1,39 +1,52 @@
-"""Create SEC filing text table for LLM analysis"""
+"""Run migration 07: Create SEC filing documents table"""
 
-from pathlib import Path
+import os
 import sys
-
-script_path = Path(__file__).resolve()
-project_root = script_path.parent.parent
-sql_file = project_root / 'sql' / '07_create_sec_filing_text.sql'
-
-sys.path.insert(0, str(script_path.parent))
+sys.path.insert(0, os.path.dirname(__file__))
 from snowflake_connection import get_session
 
-if not sql_file.exists():
-    print(f"❌ SQL file not found: {sql_file}")
-    sys.exit(1)
 
-session = get_session()
+def run_migration():
+    session = get_session()
 
-print("Creating RAW_SEC_FILING_TEXT table...\n")
+    print("Running migration 07: SEC filing documents table...")
 
-with open(sql_file, 'r', encoding='utf-8') as f:
-    sql_content = f.read()
+    session.sql("USE DATABASE FINSAGE_DB").collect()
 
-sql_statements = [stmt.strip() for stmt in sql_content.split(';') if stmt.strip()]
+    session.sql("""
+        CREATE TABLE IF NOT EXISTS RAW.RAW_SEC_FILING_DOCUMENTS (
+            filing_id           VARCHAR(100)  NOT NULL,
+            ticker              VARCHAR(10)   NOT NULL,
+            cik                 VARCHAR(20)   NOT NULL,
+            form_type           VARCHAR(10)   NOT NULL,
+            filing_date         DATE,
+            period_of_report    DATE,
+            fiscal_year         INTEGER,
+            fiscal_period       VARCHAR(10),
+            company_name        VARCHAR(200),
+            s3_raw_key          VARCHAR(500),
+            s3_mda_key          VARCHAR(500),
+            s3_risk_key         VARCHAR(500),
+            file_format         VARCHAR(10),
+            file_size_bytes     BIGINT,
+            mda_text            TEXT,
+            risk_factors_text   TEXT,
+            mda_word_count      INTEGER,
+            risk_word_count     INTEGER,
+            download_status     VARCHAR(20)   DEFAULT 'pending',
+            extraction_status   VARCHAR(20)   DEFAULT 'pending',
+            extraction_error    TEXT,
+            data_quality_score  FLOAT         DEFAULT 100.0,
+            source              VARCHAR(50)   DEFAULT 'sec_edgar',
+            ingested_at         TIMESTAMP     DEFAULT CURRENT_TIMESTAMP(),
+            updated_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP(),
+            PRIMARY KEY (filing_id, ticker)
+        )
+    """).collect()
 
-for idx, statement in enumerate(sql_statements, 1):
-    print(f"[{idx}/{len(sql_statements)}] Executing: {statement[:60]}...")
-    session.sql(statement).collect()
-    print("✅ Success")
+    print("✅ Migration 07 complete: RAW.RAW_SEC_FILING_DOCUMENTS created")
+    session.close()
 
-# Verify
-print("\nVerifying table creation...")
-result = session.sql('DESCRIBE TABLE RAW.RAW_SEC_FILING_TEXT').collect()
-print(f"\n✅ Table created with {len(result)} columns:")
-for row in result:
-    print(f"  - {row['name']:30} {row['type']}")
 
-session.close()
-print("\n🎉 RAW_SEC_FILING_TEXT ready for use!")
+if __name__ == "__main__":
+    run_migration()
