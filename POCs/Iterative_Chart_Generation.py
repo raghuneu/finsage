@@ -3,33 +3,42 @@ FinSage — Iterative Vision-Enhanced Chart Generator
 ====================================================
 Implements FinSight paper Section 2.4:
     LLM generates matplotlib code → chart rendered → VLM critiques image
-    → LLM refines → repeat × 3 → professional-quality output
+    → LLM refines → repeat x 3 → professional-quality output
+
+Model split (mirrors FinSight architecture):
+    LLM role  → Snowflake Cortex (llama3.1-70b) — code generation
+    VLM role  → Snowflake Cortex (llama3.1-70b) — text-based critique
+               (swap vlm_critique to Gemini once billing is enabled)
 
 Usage:
-    # Works RIGHT NOW — no Snowflake, no API keys needed
-    python POCs/iterative_chart_demo.py --mock
+    # Works with no API keys — uses hardcoded data and mock responses
+    python POCs/Iterative_Chart_Generation.py --mock
 
-    # Once Snowflake + Cortex connection is fixed
-    python POCs/iterative_chart_demo.py --ticker AAPL
+    # Real mode — needs working Snowflake connection
+    python POCs/Iterative_Chart_Generation.py --ticker AAPL
+    python POCs/Iterative_Chart_Generation.py --ticker TSLA --days 60
 
 Install:
     .venv\\Scripts\\pip install matplotlib snowflake-ml-python
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import textwrap
-import json
 from datetime import datetime
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import pandas as pd
+from dotenv import load_dotenv
+
+# ── Environment ────────────────────────────────────────────────────────────────
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 # ── Output directory ───────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -38,8 +47,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MOCK DATA — Hardcoded AAPL data, mirrors the demo artifact exactly
-# Used when --mock flag is passed. No Snowflake or API needed.
+# MOCK DATA
+# Used when --mock flag is passed. Zero dependencies, works right now.
 # ══════════════════════════════════════════════════════════════════════════════
 
 MOCK_DATA = [
@@ -55,25 +64,28 @@ MOCK_DATA = [
     {"date": "2025-03-10", "close": 262.18, "volume": 55400000, "high": 264.50, "low": 259.30},
 ]
 
-# ── Mock LLM/VLM responses ─────────────────────────────────────────────────────
-# These simulate what Cortex would return. Realistic enough to show the concept.
-
-MOCK_CODE_ITER1 = '''
+MOCK_CODE_ITER1 = """
 fig, ax = plt.subplots(figsize=(12, 5))
 ax.plot(df["date_str"], df["close"], color="#8884d8")
 ax.set_title("AAPL Stock Price")
-'''
+plt.xticks(rotation=45)
+"""
 
-MOCK_CRITIQUE_1 = """❌ Information density is very low — only close price is shown, but volume and moving averages are available and standard in equity charts.
-❌ Axis labels are missing entirely — no units, no axis titles, making the chart unreadable in a report context.
-❌ No legend or gridlines — impossible to read precise values or identify the series.
-❌ Color choice (#8884d8) is non-standard for financial charts — professional charts use blue or black for price."""
+MOCK_CRITIQUE_1 = (
+    "❌ Information density is very low — only close price is shown, "
+    "but volume and moving averages are available and standard in equity charts.\n"
+    "❌ Axis labels are missing entirely — no units, no axis titles, "
+    "making the chart unreadable in a report context.\n"
+    "❌ No legend or gridlines — impossible to read precise values or identify the series.\n"
+    "❌ Color choice (#8884d8) is non-standard — professional charts use blue or black for price."
+)
 
-MOCK_CODE_ITER2 = '''
+MOCK_CODE_ITER2 = """
 fig, ax1 = plt.subplots(figsize=(12, 5))
 ax2 = ax1.twinx()
 ax1.plot(df["date_str"], df["close"], color="#1f77b4", linewidth=2, label="Close Price")
-ax1.plot(df["date_str"], df["ma5"], color="#ff7f0e", linewidth=1.5, linestyle="--", label="MA5")
+ax1.plot(df["date_str"], df["ma5"], color="#ff7f0e", linewidth=1.5,
+         linestyle="--", label="MA5")
 ax2.bar(df["date_str"], df["volume_m"], color="#94a3b8", alpha=0.3, label="Volume (M)")
 ax1.set_ylabel("Price (USD)")
 ax2.set_ylabel("Volume (M)")
@@ -81,59 +93,122 @@ ax1.set_title("AAPL Stock Price with Volume and MA5")
 ax1.grid(True, alpha=0.3, linestyle="--")
 ax1.legend(loc="upper left", fontsize=9)
 plt.xticks(rotation=45)
-'''
+"""
 
-MOCK_CRITIQUE_2 = """⚠️ Clear improvements: volume and MA5 added, axes are now labeled. The chart reads much better than the first iteration.
-⚠️ High/Low range is still absent — a shaded band between high and low is standard in equity research charts and adds context about daily price spread."""
+MOCK_CRITIQUE_2 = (
+    "⚠️ Clear improvements: volume and MA5 added, axes are now labeled. "
+    "The chart reads much better than the first iteration.\n"
+    "⚠️ High/Low range is still absent — a shaded band between high and low "
+    "is standard in equity research charts and adds valuable context."
+)
 
-MOCK_CODE_ITER3 = '''
+MOCK_CODE_ITER3 = """
 fig, ax1 = plt.subplots(figsize=(14, 6))
 ax1.set_facecolor("#f8f9fa")
 fig.patch.set_facecolor("white")
 ax2 = ax1.twinx()
-
-# High/Low shaded band
 ax1.fill_between(df["date_str"], df["low"], df["high"],
                  alpha=0.06, color="gray", label="High/Low range")
-
-# Close as filled area
 ax1.fill_between(df["date_str"], df["close"].min(), df["close"],
                  alpha=0.15, color="#2563eb")
 ax1.plot(df["date_str"], df["close"], color="#2563eb",
          linewidth=2, label="Close Price")
-
-# MA5 dashed
 ax1.plot(df["date_str"], df["ma5"], color="#f59e0b",
          linewidth=2, linestyle=(0, (5, 3)), label="MA5")
-
-# Volume bars
 ax2.bar(df["date_str"], df["volume_m"], color="#94a3b8", alpha=0.3, label="Volume (M)")
-
 ax1.set_ylabel("Price (USD)", fontsize=11)
 ax2.set_ylabel("Volume (M)", fontsize=11)
 ax1.set_title("AAPL Weekly Price Analysis — Jan to Mar 2025",
               fontsize=14, fontweight="bold")
 ax1.grid(True, color="#e0e0e0", alpha=0.7, linestyle="--", linewidth=0.5)
-
-# Combined legend
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2,
+handles1, labels1 = ax1.get_legend_handles_labels()
+handles2, labels2 = ax2.get_legend_handles_labels()
+ax1.legend(handles1 + handles2, labels1 + labels2,
            loc="upper left", fontsize=9, framealpha=0.9)
-
 plt.xticks(rotation=30, fontsize=9)
-plt.tight_layout()
-'''
+"""
 
-MOCK_FINAL_REVIEW = "✅ APPROVED — Chart meets professional equity research standards with clear price, volume, and trend indicators, proper labeling, and publication-quality styling."
+MOCK_FINAL_REVIEW = (
+    "✅ APPROVED — Chart meets professional equity research standards with clear price, "
+    "volume, and trend indicators, proper labeling, and publication-quality styling."
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# REAL MODE — Snowflake data fetch + Cortex LLM/VLM
-# Only used when --mock is NOT passed
+# LLM ROLE — Snowflake Cortex (llama3.1-70b)
+# Generates and refines matplotlib chart code
+# ══════════════════════════════════════════════════════════════════════════════
+
+def llm_complete(session, model: str, prompt: str) -> str:
+    """
+    LLM role: generates and refines matplotlib chart code.
+    Uses Snowflake Cortex — no external API key needed.
+    """
+    from snowflake.cortex import complete
+
+    result = complete(model, prompt, session=session)
+
+    # Strip markdown code fences Cortex sometimes wraps around code
+    result = result.strip()
+    if result.startswith("```"):
+        lines = result.splitlines()
+        lines = lines[1:] if lines[0].startswith("```") else lines
+        lines = lines[:-1] if lines and lines[-1].strip() == "```" else lines
+        result = "\n".join(lines)
+
+    return result.strip()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VLM ROLE — Snowflake Cortex (llama3.1-70b) — text-based critique
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# NOTE: The FinSight paper uses Qwen2.5-VL-72B which critiques rendered images.
+# pixtral-large image input is blocked on Snowflake EDU accounts.
+# Gemini Flash (real image critique) can be swapped in once billing is enabled:
+#
+#   from google import genai
+#   from google.genai import types
+#   client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+#   with open(image_path, "rb") as f:
+#       image_bytes = f.read()
+#   response = client.models.generate_content(
+#       model="gemini-2.0-flash",
+#       contents=[
+#           types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+#           types.Part.from_text(text=prompt),
+#       ]
+#   )
+#   return response.text.strip()
+#
+# ══════════════════════════════════════════════════════════════════════════════
+
+def vlm_critique(session, model: str, image_path: str, prompt: str) -> str:
+    """
+    VLM role: critiques the chart via Cortex text reasoning.
+    image_path is accepted for interface consistency but not used until
+    Gemini billing is enabled (see swap instructions above).
+    """
+    from snowflake.cortex import complete
+
+    result = complete(model, prompt, session=session)
+
+    result = result.strip()
+    if result.startswith("```"):
+        lines = result.splitlines()
+        lines = lines[1:] if lines[0].startswith("```") else lines
+        lines = lines[:-1] if lines and lines[-1].strip() == "```" else lines
+        result = "\n".join(lines)
+
+    return result.strip()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SNOWFLAKE DATA FETCH
 # ══════════════════════════════════════════════════════════════════════════════
 
 def fetch_snowflake_data(ticker: str, days: int = 90) -> pd.DataFrame:
+    """Pull OHLCV data from Snowflake staging layer."""
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
     from snowflake_connection import get_session
 
@@ -158,37 +233,6 @@ def fetch_snowflake_data(ticker: str, days: int = 90) -> pd.DataFrame:
     return df
 
 
-def cortex_complete(session, model: str, prompt: str) -> str:
-    from snowflake.cortex import Complete
-    return Complete(model, prompt, session=session)
-
-
-def cortex_vision(session, model: str, image_path: str, prompt: str) -> str:
-    """
-    Cortex multimodal call — passes rendered chart image to pixtral-large.
-    This is the VLM critique step from FinSight Section 2.4.
-    """
-    import base64
-    with open(image_path, "rb") as f:
-        b64 = base64.standard_b64encode(f.read()).decode()
-
-    # Cortex multimodal via Snowpark SQL
-    sql = f"""
-        SELECT SNOWFLAKE.CORTEX.COMPLETE(
-            '{model}',
-            [{{
-                'role': 'user',
-                'content': [
-                    {{'type': 'image_url', 'image_url': {{'url': 'data:image/png;base64,{b64}'}}}},
-                    {{'type': 'text', 'text': '{prompt.replace("'", "''")}'}}
-                ]
-            }}]
-        ) AS result
-    """
-    result = session.sql(sql).collect()[0][0]
-    return result
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # CHART CODE EXECUTOR
 # Runs LLM-generated matplotlib code safely in a subprocess
@@ -197,12 +241,22 @@ def cortex_vision(session, model: str, image_path: str, prompt: str) -> str:
 def execute_chart_code(code: str, df: pd.DataFrame, output_path: str):
     """
     Writes df to a temp CSV, wraps LLM code in a runner script,
-    executes in a subprocess, saves the chart to output_path.
+    executes in subprocess, saves chart PNG to output_path.
+    Raises RuntimeError with actual stderr if rendering fails.
     """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv",
-                                     delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8"
+    ) as f:
         df.to_csv(f, index=False)
         csv_path = f.name
+
+    # Sanitize known bad kwargs Cortex sometimes generates
+    code = code.replace("fillalpha=", "alpha=")
+    code = code.replace("fill_alpha=", "alpha=")
+    code = code.replace(
+        ".legend(lines1 + lines2)",
+        ".legend(lines1 + lines2, labels1 + labels2)"
+    )
 
     runner = textwrap.dedent(f"""
 import pandas as pd
@@ -225,11 +279,11 @@ except Exception:
     pass
 plt.savefig(r"{output_path}", dpi=150, bbox_inches="tight", facecolor="white")
 plt.close("all")
-print("SAVED:" + r"{output_path}")
 """)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py",
-                                     delete=False, encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", delete=False, encoding="utf-8"
+    ) as f:
         f.write(runner)
         script_path = f.name
 
@@ -240,7 +294,8 @@ print("SAVED:" + r"{output_path}")
         )
         if result.returncode != 0:
             raise RuntimeError(
-                f"Chart render failed:\n{result.stderr[-1500:]}"
+                f"Chart render failed (exit {result.returncode}):\n"
+                f"{result.stderr[-1500:]}"
             )
     finally:
         os.unlink(script_path)
@@ -248,96 +303,170 @@ print("SAVED:" + r"{output_path}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PROMPTS — Real Cortex mode only
+# PROMPTS
+# System prompt enforces raw code output — no markdown fences
 # ══════════════════════════════════════════════════════════════════════════════
 
 CHART_CODE_SYSTEM = (
-    "Return ONLY executable Python matplotlib code — no markdown, no explanations. "
-    "Already available: pandas as pd, matplotlib.pyplot as plt, numpy as np, "
-    "df (DataFrame with columns: date, open, high, low, close, volume, ma5, volume_m, date_str). "
-    "Do NOT redefine df. Do NOT call plt.show() or plt.savefig()."
+    "Return ONLY raw executable Python code. "
+    "NO markdown, NO backticks, NO ```python fences, NO explanations, NO comments. "
+    "Start directly with code statements. "
+    "Already available — do NOT import or redefine: "
+    "pandas as pd, matplotlib.pyplot as plt, matplotlib.ticker as mticker, "
+    "numpy as np, df (DataFrame with columns: date, open, high, low, close, "
+    "volume, ma5, volume_m, date_str). "
+    "Do NOT call plt.show() or plt.savefig()."
 )
 
-def prompt_iter1(ticker, df):
+
+def prompt_iter1(ticker: str, df: pd.DataFrame) -> str:
     return (
-        f"Generate a BASIC minimal matplotlib chart for {ticker}. "
-        f"Data: {len(df)} rows, close range ${df['close'].min():.2f}–${df['close'].max():.2f}. "
-        "Single close price line only, no grid, no legend, no axis labels. "
-        f'Title: "{ticker} Stock Price". figsize=(12,5). Use date_str on x-axis, rotate 45 degrees.'
+        f"{CHART_CODE_SYSTEM}\n\n"
+        f"Generate a BASIC, intentionally minimal matplotlib chart for {ticker} stock.\n"
+        f"Data: {len(df)} rows | "
+        f"close range ${df['close'].min():.2f}-${df['close'].max():.2f} | "
+        f"date range {df['date_str'].iloc[0]} to {df['date_str'].iloc[-1]}\n\n"
+        "Requirements — keep this simple on purpose:\n"
+        "- Single line chart of close price only\n"
+        "- Use date_str on x-axis, rotate labels 45 degrees\n"
+        "- No gridlines, no legend, no axis labels\n"
+        "- Default matplotlib blue line, no custom styling\n"
+        f"- Title: \"{ticker} Stock Price\"\n"
+        "- figsize=(12, 5)"
     )
 
-def prompt_critique_1(ticker):
+
+def prompt_critique_1(ticker: str) -> str:
     return (
-        f"You are a VLM critiquing a {ticker} stock chart for an equity research report. "
-        "List exactly 3-4 issues starting with ❌. Cover: information density, label clarity, "
-        "visual quality, missing elements. 3-5 sentences total. Plain text only."
+        f"You are a VLM (Vision-Language Model) critiquing a {ticker} stock chart "
+        "for inclusion in a professional equity research report.\n\n"
+        "Evaluate these four dimensions:\n"
+        "1. Information density — what key financial data is missing?\n"
+        "2. Label clarity — are axes, units, and series properly labeled?\n"
+        "3. Visual quality — is the styling appropriate for a professional report?\n"
+        "4. Missing standard elements — what do equity research charts normally include?\n\n"
+        "List exactly 3-4 specific, actionable issues. Start each with ❌.\n"
+        "Total response: 3-5 sentences. Plain text only."
     )
 
-def prompt_iter2(ticker, prev_code, critique):
+
+def prompt_iter2(ticker: str, prev_code: str, critique: str) -> str:
     return (
-        f"Improve this {ticker} chart. Previous code:\n{prev_code}\n\n"
+        f"{CHART_CODE_SYSTEM}\n\n"
+        f"Improve this {ticker} chart based on the VLM critique.\n\n"
+        f"Previous code:\n{prev_code}\n\n"
         f"VLM critique:\n{critique}\n\n"
-        "Add: volume_m bars on right axis (ax.twinx()), ma5 as dashed orange line, "
-        "gridlines (alpha=0.3), axis labels 'Price (USD)' and 'Volume (M)', legend. "
-        "Professional blue (#1f77b4) for close. figsize=(12,5)."
+        "Apply these improvements:\n"
+        "- Add volume_m as semi-transparent bars on a right Y-axis (ax.twinx())\n"
+        "- Add ma5 as a dashed orange line (color='#ff7f0e', linewidth=1.5)\n"
+        "- Add gridlines (alpha=0.3, linestyle='--')\n"
+        "- Label left Y-axis 'Price (USD)', right Y-axis 'Volume (M)'\n"
+        "- Add legend (loc='upper left', fontsize=9)\n"
+        "- Use professional blue (#1f77b4) for close price\n"
+        "- figsize=(12, 5)"
     )
 
-def prompt_critique_2(ticker):
+
+def prompt_critique_2(ticker: str) -> str:
     return (
-        f"Re-evaluate this improved {ticker} chart. Note 1-2 improvements, "
-        "then list 1-2 remaining gaps with ⚠️ for publication readiness. "
-        "2-4 sentences. Plain text only."
+        f"You are a VLM re-evaluating an improved {ticker} stock chart.\n\n"
+        "First briefly note 1-2 clear improvements from the previous version.\n"
+        "Then identify 1-2 remaining gaps with ⚠️ that would prevent this "
+        "from being published in a professional equity research report.\n\n"
+        "Total response: 2-4 sentences. Plain text only."
     )
 
-def prompt_iter3(ticker, prev_code, critique):
+
+def prompt_iter3(ticker: str, prev_code: str, critique: str) -> str:
     return (
-        f"Create a PROFESSIONAL publication-ready {ticker} chart. Previous:\n{prev_code}\n\n"
-        f"Critique:\n{critique}\n\n"
-        "Requirements: close as filled area (#2563eb, alpha=0.15), ma5 dashed amber (#f59e0b), "
-        "high/low shaded band (alpha=0.06 gray), volume bars (#94a3b8 alpha=0.3) on right axis, "
-        "ax.set_facecolor('#f8f9fa'), gridlines (#e0e0e0), fontsize title=14 bold, labels=11, ticks=9, "
-        "combined legend upper left, rotate x-ticks 30deg. figsize=(14,6)."
+        f"{CHART_CODE_SYSTEM}\n\n"
+        f"Create a PROFESSIONAL, publication-ready {ticker} stock chart.\n\n"
+        f"Previous code:\n{prev_code}\n\n"
+        f"VLM critique:\n{critique}\n\n"
+        "Make it publication-ready. Use ONLY these exact patterns — no other kwargs:\n"
+        "- Setup: fig, ax1 = plt.subplots(figsize=(14, 6)); ax2 = ax1.twinx()\n"
+        "- Background: ax1.set_facecolor('#f8f9fa')\n"
+        "- High/Low band: ax1.fill_between(df['date_str'], df['low'], df['high'], alpha=0.06, color='gray', label='High/Low range')\n"
+        "- Close area: ax1.fill_between(df['date_str'], df['close'].min(), df['close'], alpha=0.15, color='#2563eb')\n"
+        "- Close line: ax1.plot(df['date_str'], df['close'], color='#2563eb', linewidth=2, label='Close Price')\n"
+        "- MA5 line: ax1.plot(df['date_str'], df['ma5'], color='#f59e0b', linewidth=2, linestyle='--', label='MA5')\n"
+        "- Volume bars: ax2.bar(df['date_str'], df['volume_m'], color='#94a3b8', alpha=0.3, label='Volume (M)')\n"
+        "- Grid: ax1.grid(True, color='#e0e0e0', alpha=0.7, linestyle='--', linewidth=0.5)\n"
+        "- Title: ax1.set_title(f'{ticker} Weekly Price Analysis', fontsize=14, fontweight='bold')\n"
+        "- Axis labels: ax1.set_ylabel('Price (USD)', fontsize=11) and ax2.set_ylabel('Volume (M)', fontsize=11)\n"
+        "- Legend (use exactly this pattern):\n"
+        "    handles1, labels1 = ax1.get_legend_handles_labels()\n"
+        "    handles2, labels2 = ax2.get_legend_handles_labels()\n"
+        "    ax1.legend(handles1 + handles2, labels1 + labels2, loc='upper left', fontsize=9, framealpha=0.9)\n"
+        "- Ticks: plt.xticks(rotation=30, fontsize=9)\n"
+        "IMPORTANT: fill_between does NOT accept fillalpha — use alpha only."
     )
 
-def prompt_final_review(ticker):
+
+def prompt_final_review(ticker: str) -> str:
     return (
-        f"You are a senior equity analyst approving a {ticker} chart for client publication. "
-        "If it meets professional standards start with '✅ APPROVED —' then one sentence why. "
-        "If not start with '⚠️ NEEDS REVISION —' and one specific fix. 1-2 sentences only."
+        f"You are a senior equity research analyst giving final approval on a "
+        f"{ticker} stock chart for client publication.\n\n"
+        "Review against professional equity research standards:\n"
+        "- Does it show price, volume, and a trend indicator (MA)?\n"
+        "- Are all axes, labels, and legend clear and properly formatted?\n"
+        "- Is the visual quality appropriate for a professional PDF report?\n\n"
+        "If it meets the standard start with: '✅ APPROVED —' then one sentence why.\n"
+        "If not start with: '⚠️ NEEDS REVISION —' and one specific fix needed.\n"
+        "Total: 1-2 sentences only. Plain text."
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _print_box(label: str, text: str):
+    width = 54
+    print(f"\n  ┌─ {label} {'─' * max(0, width - len(label) - 1)}")
+    for line in text.strip().splitlines():
+        print(f"  │ {line}")
+    print(f"  └{'─' * (width + 2)}\n")
+
+
+def _prepare_mock_df() -> pd.DataFrame:
+    df = pd.DataFrame(MOCK_DATA)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+    df["ma5"] = df["close"].rolling(window=5).mean().round(2)
+    df["volume_m"] = (df["volume"] / 1_000_000).round(2)
+    df["date_str"] = df["date"].dt.strftime("%b %d")
+    return df
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run(ticker: str, mock: bool = False, days: int = 90):
-    banner = f"  FinSage — Iterative Vision-Enhanced Chart Generator  "
+def run(ticker: str, mock: bool = False, days: int = 90) -> dict:
+    banner = "  FinSage — Iterative Vision-Enhanced Chart Generator  "
     div = "═" * len(banner)
-    mode_label = "MOCK MODE (no API calls)" if mock else "REAL MODE (Cortex AI)"
+    mode_label = "MOCK MODE (no API calls)" if mock else "REAL MODE (Cortex LLM + Cortex VLM)"
     print(f"\n{div}\n{banner}\n{div}")
     print(f"  Ticker: {ticker}  |  Mode: {mode_label}\n")
 
-    # ── Data ───────────────────────────────────────────────────────────────────
+    # ── 1. Data ────────────────────────────────────────────────────────────────
     if mock:
         print("[ 1 / 7 ]  Loading mock AAPL data (hardcoded)...")
-        df = pd.DataFrame(MOCK_DATA)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").reset_index(drop=True)
-        df["ma5"] = df["close"].rolling(window=5).mean().round(2)
-        df["volume_m"] = (df["volume"] / 1_000_000).round(2)
-        df["date_str"] = df["date"].dt.strftime("%b %d")
+        df = _prepare_mock_df()
         session = None
     else:
         print("[ 1 / 7 ]  Fetching data from Snowflake...")
-        df = fetch_snowflake_data(ticker, days)
         sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
         from snowflake_connection import get_session
+        df = fetch_snowflake_data(ticker, days)
         session = get_session()
 
-    print(f"           {len(df)} rows | "
-          f"{df['date_str'].iloc[0]} → {df['date_str'].iloc[-1]} | "
-          f"Close ${df['close'].min():.2f}–${df['close'].max():.2f}")
+    print(
+        f"           {len(df)} rows | "
+        f"{df['date_str'].iloc[0]} → {df['date_str'].iloc[-1]} | "
+        f"Close ${df['close'].min():.2f}–${df['close'].max():.2f}"
+    )
 
     # ── Run directory ──────────────────────────────────────────────────────────
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -349,29 +478,27 @@ def run(ticker: str, mock: bool = False, days: int = 90):
         "mode": "mock" if mock else "real",
         "run_at": ts,
         "data_rows": len(df),
+        "date_range": {
+            "start": df["date"].min().strftime("%Y-%m-%d"),
+            "end":   df["date"].max().strftime("%Y-%m-%d"),
+        },
         "iterations": [],
     }
 
-    # ── Iteration 1 ───────────────────────────────────────────────────────────
-    print("[ 2 / 7 ]  Iteration 1: Generating basic chart (LLM)...")
-    if mock:
-        code1 = MOCK_CODE_ITER1
-    else:
-        code1 = cortex_complete(
-            session, "llama3.1-70b",
-            f"{CHART_CODE_SYSTEM}\n\n{prompt_iter1(ticker, df)}"
-        )
+    # ── 2. Iteration 1 — Basic ─────────────────────────────────────────────────
+    print("[ 2 / 7 ]  Iteration 1: Generating basic chart (LLM — Cortex llama3.1-70b)...")
+    code1 = MOCK_CODE_ITER1 if mock else llm_complete(
+        session, "llama3.1-70b", prompt_iter1(ticker, df)
+    )
     path1 = str(run_dir / "iter1_basic.png")
     execute_chart_code(code1, df, path1)
     print(f"           ✓ Saved → iter1_basic.png")
 
-    # ── Critique 1 ────────────────────────────────────────────────────────────
-    print("[ 3 / 7 ]  VLM Critique #1 (pixtral-large reviewing rendered image)...")
-    if mock:
-        critique1 = MOCK_CRITIQUE_1
-    else:
-        critique1 = cortex_vision(session, "pixtral-large", path1,
-                                  prompt_critique_1(ticker))
+    # ── 3. Critique 1 ─────────────────────────────────────────────────────────
+    print("[ 3 / 7 ]  VLM Critique #1 (Cortex llama3.1-70b)...")
+    critique1 = MOCK_CRITIQUE_1 if mock else vlm_critique(
+        session, "llama3.1-70b", path1, prompt_critique_1(ticker)
+    )
     _print_box("VLM Critique 1", critique1)
     results["iterations"].append({
         "label": "Iteration 1 — Basic",
@@ -379,26 +506,20 @@ def run(ticker: str, mock: bool = False, days: int = 90):
         "critique": critique1,
     })
 
-    # ── Iteration 2 ───────────────────────────────────────────────────────────
-    print("[ 4 / 7 ]  Iteration 2: Improving chart based on critique (LLM)...")
-    if mock:
-        code2 = MOCK_CODE_ITER2
-    else:
-        code2 = cortex_complete(
-            session, "llama3.1-70b",
-            f"{CHART_CODE_SYSTEM}\n\n{prompt_iter2(ticker, code1, critique1)}"
-        )
+    # ── 4. Iteration 2 — Improved ─────────────────────────────────────────────
+    print("[ 4 / 7 ]  Iteration 2: Improving chart based on critique (LLM — Cortex)...")
+    code2 = MOCK_CODE_ITER2 if mock else llm_complete(
+        session, "llama3.1-70b", prompt_iter2(ticker, code1, critique1)
+    )
     path2 = str(run_dir / "iter2_improved.png")
     execute_chart_code(code2, df, path2)
     print(f"           ✓ Saved → iter2_improved.png")
 
-    # ── Critique 2 ────────────────────────────────────────────────────────────
-    print("[ 5 / 7 ]  VLM Critique #2...")
-    if mock:
-        critique2 = MOCK_CRITIQUE_2
-    else:
-        critique2 = cortex_vision(session, "pixtral-large", path2,
-                                  prompt_critique_2(ticker))
+    # ── 5. Critique 2 ─────────────────────────────────────────────────────────
+    print("[ 5 / 7 ]  VLM Critique #2 (Cortex llama3.1-70b)...")
+    critique2 = MOCK_CRITIQUE_2 if mock else vlm_critique(
+        session, "llama3.1-70b", path2, prompt_critique_2(ticker)
+    )
     _print_box("VLM Critique 2", critique2)
     results["iterations"].append({
         "label": "Iteration 2 — Improved",
@@ -406,26 +527,20 @@ def run(ticker: str, mock: bool = False, days: int = 90):
         "critique": critique2,
     })
 
-    # ── Iteration 3 ───────────────────────────────────────────────────────────
-    print("[ 6 / 7 ]  Iteration 3: Creating publication-ready chart (LLM)...")
-    if mock:
-        code3 = MOCK_CODE_ITER3
-    else:
-        code3 = cortex_complete(
-            session, "llama3.1-70b",
-            f"{CHART_CODE_SYSTEM}\n\n{prompt_iter3(ticker, code2, critique2)}"
-        )
+    # ── 6. Iteration 3 — Professional ─────────────────────────────────────────
+    print("[ 6 / 7 ]  Iteration 3: Creating publication-ready chart (LLM — Cortex)...")
+    code3 = MOCK_CODE_ITER3 if mock else llm_complete(
+        session, "llama3.1-70b", prompt_iter3(ticker, code2, critique2)
+    )
     path3 = str(run_dir / "iter3_professional.png")
     execute_chart_code(code3, df, path3)
     print(f"           ✓ Saved → iter3_professional.png")
 
-    # ── Final review ──────────────────────────────────────────────────────────
-    print("[ 7 / 7 ]  VLM Final Review...")
-    if mock:
-        final = MOCK_FINAL_REVIEW
-    else:
-        final = cortex_vision(session, "pixtral-large", path3,
-                              prompt_final_review(ticker))
+    # ── 7. Final review ────────────────────────────────────────────────────────
+    print("[ 7 / 7 ]  VLM Final Review (Cortex llama3.1-70b)...")
+    final = MOCK_FINAL_REVIEW if mock else vlm_critique(
+        session, "llama3.1-70b", path3, prompt_final_review(ticker)
+    )
     _print_box("Final Review", final)
     results["iterations"].append({
         "label": "Iteration 3 — Professional",
@@ -433,36 +548,29 @@ def run(ticker: str, mock: bool = False, days: int = 90):
         "critique": final,
     })
 
-    # ── Cleanup ───────────────────────────────────────────────────────────────
+    # ── Cleanup ────────────────────────────────────────────────────────────────
     if session:
         session.close()
 
-    # ── Summary JSON ──────────────────────────────────────────────────────────
+    # ── Summary JSON ───────────────────────────────────────────────────────────
     summary_path = run_dir / "summary.json"
     with open(summary_path, "w") as f:
         json.dump(results, f, indent=2)
 
-    # ── Final banner ──────────────────────────────────────────────────────────
+    # ── Final banner ───────────────────────────────────────────────────────────
     print(f"\n{div}")
     print(f"  ✅  Complete!")
-    print(f"  Output folder: {run_dir}")
-    print(f"    iter1_basic.png          ← intentionally basic")
-    print(f"    iter2_improved.png       ← partially improved")
-    print(f"    iter3_professional.png   ← publication-ready")
-    print(f"    summary.json             ← all critiques + metadata")
+    print(f"  Output: {run_dir}")
+    print(f"    iter1_basic.png          <- intentionally basic")
+    print(f"    iter2_improved.png       <- partially improved")
+    print(f"    iter3_professional.png   <- publication-ready")
+    print(f"    summary.json             <- all critiques + metadata")
     if mock:
         print(f"\n  This was MOCK MODE — re-run without --mock once")
-        print(f"  Snowflake connection is working to use real Cortex AI")
-    print(div + "\n")
+        print(f"  Snowflake connection is confirmed working.")
+    print(f"{div}\n")
 
     return results
-
-
-def _print_box(label: str, text: str):
-    print(f"\n  ┌─ {label} {'─' * max(0, 50 - len(label))}")
-    for line in text.strip().splitlines():
-        print(f"  │ {line}")
-    print(f"  └{'─' * 54}\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -475,20 +583,28 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
             Examples:
-              # Test right now — no Snowflake or API needed
-              python POCs/iterative_chart_demo.py --mock
+              # No dependencies needed — run right now
+              python POCs/Iterative_Chart_Generation.py --mock
 
-              # Real mode — needs working Snowflake + Cortex
-              python POCs/iterative_chart_demo.py --ticker AAPL
-              python POCs/iterative_chart_demo.py --ticker TSLA --days 60
+              # Real mode — needs working Snowflake connection
+              python POCs/Iterative_Chart_Generation.py --ticker AAPL
+              python POCs/Iterative_Chart_Generation.py --ticker TSLA --days 60
+
+            Available tickers: AAPL, TSLA, MSFT
         """),
     )
-    parser.add_argument("--ticker", default="AAPL",
-                        help="Stock ticker (default: AAPL)")
-    parser.add_argument("--days", type=int, default=90,
-                        help="Trading days to fetch (default: 90, real mode only)")
-    parser.add_argument("--mock", action="store_true",
-                        help="Run with hardcoded data and mock responses (no API calls)")
+    parser.add_argument(
+        "--ticker", default="AAPL",
+        help="Stock ticker symbol (default: AAPL)"
+    )
+    parser.add_argument(
+        "--days", type=int, default=90,
+        help="Trading days to fetch from Snowflake (default: 90, real mode only)"
+    )
+    parser.add_argument(
+        "--mock", action="store_true",
+        help="Run with hardcoded data and mock responses — no API calls"
+    )
     args = parser.parse_args()
 
     run(args.ticker.upper(), mock=args.mock, days=args.days)
