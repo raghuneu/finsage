@@ -1,12 +1,12 @@
 """Basic Snowflake connection test using .env"""
- 
+
 import os
 from dotenv import load_dotenv
 from snowflake.snowpark import Session
- 
+
 # Load environment variables
 load_dotenv()
- 
+
 # Build connection parameters from .env
 connection_params = {
     "account": os.getenv("SNOWFLAKE_ACCOUNT"),
