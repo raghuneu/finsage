@@ -12,3 +12,6 @@ airflow/.env
 airflow/plugins/
 
 ignoreFiles/
+
+# Generated outputs
+outputs/
