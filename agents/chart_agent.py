@@ -172,37 +172,10 @@ def build_financial_health_summary(df: pd.DataFrame) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────
-# Cortex helpers
+# Cortex / Vision helpers (shared via vision_utils)
 # ──────────────────────────────────────────────────────────────
 
-def cortex_complete(session, prompt: str, model: str = CORTEX_MODEL_LLM) -> str:
-    safe = prompt.replace("'", "\\'")
-    sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{model}', '{safe}') AS r"
-    rows = session.sql(sql).collect()
-    raw = rows[0]["R"].strip() if rows and rows[0]["R"] else ""
-
-    # Strip markdown code fences if LLM wraps output in ```python ... ```
-    if "```" in raw:
-        lines = raw.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        raw = "\n".join(lines).strip()
-
-    return raw
-
-
-def cortex_vision_critique(session, image_path: str, prompt: str) -> str:
-    """
-    Send rendered chart context to pixtral-large for VLM critique.
-    Uses text-only mode (pixtral-large responds to text on this account).
-    """
-    vision_prompt = (
-        f"{prompt}\n\n"
-        f"[Evaluate based on the chart description and context provided]"
-    )
-    return cortex_complete(session, vision_prompt, model=CORTEX_MODEL_VLM)
+from agents.vision_utils import cortex_complete, vision_critique
 
 
 # ──────────────────────────────────────────────────────────────
@@ -578,7 +551,8 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
 def generate_single_chart(
     session, chart_id: str, ticker: str,
     df: pd.DataFrame, output_dir: Path,
-    debug: bool = False
+    debug: bool = False,
+    data_summary: dict = None,
 ) -> dict:
     """
     Generate one chart through 3 LLM+VLM refinement iterations.
@@ -586,7 +560,7 @@ def generate_single_chart(
 
     Args:
         debug: If True, saves all 3 iteration PNGs and prints critiques to logs.
-               If False, only the final chart is saved.
+        data_summary: Pre-computed chart metrics for VLM critique enrichment.
 
     Returns a ChartResult dict.
     """
@@ -616,7 +590,7 @@ def generate_single_chart(
             f"List exactly 3 issues starting with ❌. Cover: information density, "
             f"label clarity, missing elements. 3-5 sentences. Plain text only."
         )
-        critique1 = cortex_vision_critique(session, path1, critique_prompt1)
+        critique1 = vision_critique(session, path1, critique_prompt1, data_summary=data_summary)
 
         if debug:
             logger.info("  [DEBUG] Critique 1:\n%s", critique1)
@@ -640,7 +614,7 @@ def generate_single_chart(
             f"Note 1-2 improvements, then list 1-2 remaining gaps with ⚠️. "
             f"2-4 sentences. Plain text only."
         )
-        critique2 = cortex_vision_critique(session, path2, critique_prompt2)
+        critique2 = vision_critique(session, path2, critique_prompt2, data_summary=data_summary)
 
         if debug:
             logger.info("  [DEBUG] Critique 2:\n%s", critique2)
@@ -674,6 +648,7 @@ def generate_single_chart(
         "validated": os.path.exists(final_path) and os.path.getsize(final_path) > 0,
         "refinement_count": refinement_count,
         "data_summary": {},  # populated by generate_charts()
+        "_df": df,           # DataFrame for validation re-render (excluded from JSON)
     }
 
 
@@ -737,10 +712,14 @@ def generate_charts(
             logger.warning("No data for chart '%s', skipping", chart_id)
             continue
 
+        # Compute data_summary BEFORE chart generation so VLM critique has context
+        data_summary = summary_fn(df)
+
         chart_result = generate_single_chart(
-            session, chart_id, ticker, df, out, debug=debug
+            session, chart_id, ticker, df, out, debug=debug,
+            data_summary=data_summary,
         )
-        chart_result["data_summary"] = summary_fn(df)
+        chart_result["data_summary"] = data_summary
         results.append(chart_result)
 
     logger.info(
@@ -752,7 +731,7 @@ def generate_charts(
     manifest_path = out / "chart_manifest.json"
     with open(manifest_path, "w") as f:
         json.dump(
-            [{k: v for k, v in r.items() if k != "file_path"} for r in results],
+            [{k: v for k, v in r.items() if k not in ("file_path", "_df")} for r in results],
             f, indent=2
         )
 

@@ -450,6 +450,19 @@ def build_executive_summary(ticker: str, charts: list,
 
     elements.append(Spacer(1, 8 * mm))
 
+    # Investment thesis (Chain-of-Analysis synthesis)
+    thesis = analysis.get("investment_thesis", "")
+    if thesis and "not available" not in thesis.lower():
+        elements.append(Paragraph(
+            "Investment Thesis", styles["appendix_header"]
+        ))
+        elements.append(HRFlowable(
+            width="100%", thickness=0.5,
+            color=C_DIVIDER, spaceAfter=6
+        ))
+        elements.append(Paragraph(thesis, styles["body"]))
+        elements.append(Spacer(1, 6 * mm))
+
     # MD&A summary paragraph
     elements.append(Paragraph(
         "Management Commentary Summary", styles["appendix_header"]

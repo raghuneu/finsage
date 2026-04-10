@@ -3,6 +3,7 @@ FinSage Data Collection Pipeline
 Master orchestrator for all data loaders
 """
 
+import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -19,6 +20,7 @@ from src.data_loaders.stock_loader import StockPriceLoader
 from src.data_loaders.fundamentals_loader import FundamentalsLoader
 from src.data_loaders.news_loader import NewsLoader
 from src.data_loaders.sec_loader import SECFilingLoader
+from src.data_loaders.xbrl_loader import XBRLLoader
 
 logger = setup_logger(__name__, 'data_pipeline.log')
 
@@ -36,7 +38,8 @@ def load_tickers():
     return config.get('tickers', [])
 
 def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
-                 load_news=False, load_sec=True):
+                 load_news=True, load_sec=True, load_xbrl=True,
+                 load_s3_filings=False, run_dbt=False):
     """
     Run complete data collection pipeline
 
@@ -46,6 +49,9 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
         load_fundamentals: Load company fundamentals
         load_news: Load news articles (requires NewsAPI key)
         load_sec: Load SEC filings (10-K, 10-Q)
+        load_xbrl: Load XBRL structured financial data
+        load_s3_filings: Download SEC filings to S3 + extract text (requires AWS credentials)
+        run_dbt: Run dbt transformations after loading
     """
     logger.info("="*60)
     logger.info("🚀 FinSage Data Collection Pipeline Starting")
@@ -58,7 +64,7 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
 
     logger.info(f"📊 Processing {len(tickers)} tickers")
     logger.info(f"Tickers: {', '.join(tickers)}")
-    logger.info(f"Loading: stocks={load_stocks}, fundamentals={load_fundamentals}, news={load_news}, sec={load_sec}")
+    logger.info(f"Loading: stocks={load_stocks}, fundamentals={load_fundamentals}, news={load_news}, sec={load_sec}, xbrl={load_xbrl}")
 
     # Initialize Snowflake client
     sf_client = SnowflakeClient()
@@ -73,6 +79,8 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
         loaders['news'] = NewsLoader(sf_client)
     if load_sec:
         loaders['sec'] = SECFilingLoader(sf_client)
+    if load_xbrl:
+        loaders['xbrl'] = XBRLLoader(sf_client)
 
     # Track results
     results = {
@@ -105,10 +113,33 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
                 logger.info(f"📰 Loading news for {ticker}...")
                 loader_results['news'] = loaders['news'].load(ticker)
 
-            # SEC filings (10-K, 10-Q)
+            # SEC filings (10-K, 10-Q full text)
             if load_sec:
                 logger.info(f"📄 Loading SEC filings for {ticker}...")
                 loader_results['sec'] = loaders['sec'].load(ticker, max_filings=2)
+
+            # SEC XBRL structured financial data
+            if load_xbrl:
+                logger.info(f"📊 Loading XBRL data for {ticker}...")
+                loader_results['xbrl'] = loaders['xbrl'].load(ticker)
+
+            # S3 SEC filing download + text extraction (requires AWS)
+            if load_s3_filings:
+                logger.info(f"📥 Downloading + extracting SEC filings for {ticker} via S3...")
+                try:
+                    from sec_filings.filing_downloader import download_filings_for_ticker
+                    from sec_filings.text_extractor import extract_pending_filings
+
+                    for form_type in ["10-K", "10-Q"]:
+                        download_filings_for_ticker(ticker, form_type, count=2)
+                    extract_pending_filings(ticker=ticker)
+                    loader_results['s3_filings'] = True
+                except ImportError:
+                    logger.warning("S3 filing modules not available — pip install boto3")
+                    loader_results['s3_filings'] = False
+                except Exception as e:
+                    logger.error(f"S3 filing pipeline failed for {ticker}: {e}")
+                    loader_results['s3_filings'] = False
 
             # Categorize result
             if all(loader_results.values()):
@@ -132,6 +163,29 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
 
     # Close connection
     sf_client.close()
+
+    # Run dbt transformations if requested
+    if run_dbt:
+        dbt_dir = project_root / 'dbt_finsage'
+        logger.info("Running dbt transformations...")
+        try:
+            result = subprocess.run(
+                ['dbt', 'run'],
+                cwd=str(dbt_dir),
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            if result.returncode == 0:
+                logger.info("dbt run completed successfully")
+            else:
+                logger.error(f"dbt run failed:\n{result.stderr}")
+        except FileNotFoundError:
+            logger.warning("dbt not found in PATH — install with: pip install dbt-snowflake")
+        except subprocess.TimeoutExpired:
+            logger.error("dbt run timed out after 5 minutes")
+        except Exception as e:
+            logger.error(f"dbt execution failed: {e}")
 
     # Summary
     logger.info(f"\n{'='*60}")
@@ -162,8 +216,10 @@ if __name__ == "__main__":
         tickers=test_tickers,
         load_stocks=True,
         load_fundamentals=True,
-        load_news=False,  # Set to True if you have NewsAPI key
-        load_sec=True     # CRITICAL for LLM phase!
+        load_news=True,   # Requires NEWSAPI_KEY environment variable
+        load_sec=True,    # Full-text filings for LLM analysis
+        load_xbrl=True,   # XBRL structured data for analytics layer
+        run_dbt=True      # Run dbt staging + analytics after loading
     )
 
     print(f"\n🎉 Pipeline complete! {len(results['success'])} successful")

@@ -1,21 +1,30 @@
--- Create SEC filings table for storing 10-K and 10-Q full text
--- CRITICAL for LLM analysis phase
+-- ============================================================
+-- DEPRECATED: DO NOT RUN
+-- Superseded by 07_create_sec_filing_text.sql which creates
+-- RAW_SEC_FILING_TEXT with a more complete schema.
+--
+-- This file previously created RAW_SEC_FILINGS with a full-text
+-- schema (PK: ticker, accession_number), which COLLIDES with
+-- 06_create_sec_table.sql that creates the XBRL version of
+-- RAW_SEC_FILINGS (PK: ticker, concept, period_end, fiscal_period).
+--
+-- The XBRL version (06_create_sec_table.sql) is the canonical
+-- RAW_SEC_FILINGS table used by dbt stg_sec_filings.
+-- ============================================================
 
-CREATE TABLE IF NOT EXISTS RAW.RAW_SEC_FILINGS (
-    ticker VARCHAR(10),
-    cik VARCHAR(10),
-    company_name VARCHAR(200),
-    form_type VARCHAR(10),
-    filing_date DATE,
-    report_date DATE,
-    accession_number VARCHAR(30),
-    primary_document VARCHAR(200),
-    filing_text VARIANT,  -- Stores large text as JSON/string
-    source VARCHAR(50) DEFAULT 'sec_edgar',
-    ingested_at TIMESTAMP,
-    data_quality_score FLOAT DEFAULT 100.0,
-    PRIMARY KEY (ticker, accession_number)
-);
-
--- Add comment
-COMMENT ON TABLE RAW.RAW_SEC_FILINGS IS 'SEC 10-K and 10-Q filings with full text for LLM analysis';
+-- Original DDL preserved for reference only:
+-- CREATE TABLE IF NOT EXISTS RAW.RAW_SEC_FILINGS (
+--     ticker VARCHAR(10),
+--     cik VARCHAR(10),
+--     company_name VARCHAR(200),
+--     form_type VARCHAR(10),
+--     filing_date DATE,
+--     report_date DATE,
+--     accession_number VARCHAR(30),
+--     primary_document VARCHAR(200),
+--     filing_text VARIANT,
+--     source VARCHAR(50) DEFAULT 'sec_edgar',
+--     ingested_at TIMESTAMP,
+--     data_quality_score FLOAT DEFAULT 100.0,
+--     PRIMARY KEY (ticker, accession_number)
+-- );

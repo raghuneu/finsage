@@ -198,7 +198,7 @@ class GuardedLLM:
                 "action": action,
                 "blocked": blocked,
                 "details": details,
-                "output": response.get("outputs", [{}])[0].get("text", text),
+                "output": response["outputs"][0].get("text", text) if response.get("outputs") else text,
             }
 
         except Exception as e:

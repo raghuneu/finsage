@@ -17,3 +17,6 @@ python-dotenv
 
 # AWS
 boto3
+
+# Vision (Gemini 2.0 Flash for VLM chart critique)
+google-genai
