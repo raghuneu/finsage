@@ -9,6 +9,7 @@
 -- fct_news_sentiment_agg
 -- Daily aggregated news sentiment per ticker.
 -- Grain: one row per ticker per day.
+-- Now uses Snowflake Cortex ML sentiment scores.
 -- ──────────────────────────────────────────────────────────────
 
 WITH base AS (
@@ -18,7 +19,8 @@ WITH base AS (
         title,
         published_at,
         DATE(published_at)  AS news_date,
-        sentiment,
+        sentiment,           -- 'positive' | 'negative' | 'neutral' (Cortex-derived)
+        sentiment_score,     -- float -1.0 to +1.0 from CORTEX.SENTIMENT()
         data_quality_score
     FROM {{ ref('stg_news') }}
 ),
@@ -38,14 +40,9 @@ daily_agg AS (
         COUNT(CASE WHEN sentiment = 'neutral'  THEN 1 END)
                                                     AS neutral_count,
 
-        -- ── Sentiment score (-1 to +1) ────────────────────────
-        -- Positive articles count +1, negative count -1, neutral 0
-        ROUND(
-            (
-                COUNT(CASE WHEN sentiment = 'positive' THEN 1 END)
-                - COUNT(CASE WHEN sentiment = 'negative' THEN 1 END)
-            ) / NULLIF(COUNT(article_id), 0)
-        , 4)                                        AS sentiment_score,
+        -- ── Daily sentiment score: avg of Cortex scores ───────
+        -- More precise than the old (+1 / -1 / 0) integer method
+        ROUND(AVG(sentiment_score), 4)              AS sentiment_score,
 
         -- ── Sentiment ratio (% positive of non-neutral) ───────
         ROUND(
@@ -120,8 +117,8 @@ SELECT
 
     -- ── Daily sentiment label ─────────────────────────────────
     CASE
-        WHEN sentiment_score >= 0.3  THEN 'BULLISH'
-        WHEN sentiment_score <= -0.3 THEN 'BEARISH'
+        WHEN sentiment_score >= 0.2  THEN 'BULLISH'
+        WHEN sentiment_score <= -0.2 THEN 'BEARISH'
         WHEN total_articles = 0      THEN 'NO_COVERAGE'
         ELSE 'NEUTRAL'
     END                                             AS sentiment_label,
