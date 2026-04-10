@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Optional, List
 from .logger import setup_logger
 
+
 class SnowflakeClient:
     """Reusable Snowflake client with helper methods"""
 
@@ -17,31 +18,36 @@ class SnowflakeClient:
         self._connect()
 
     def _connect(self):
-
         """Create Snowflake session using environment variables"""
         connection_params = {
-        "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-        "user": os.getenv("SNOWFLAKE_USER"),
-        "password": os.getenv("SNOWFLAKE_PASSWORD"),
-        "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-        "database": os.getenv("SNOWFLAKE_DATABASE"),
-        "schema": os.getenv("SNOWFLAKE_SCHEMA"),
-    }
+            "account": os.getenv("SNOWFLAKE_ACCOUNT"),
+            "user": os.getenv("SNOWFLAKE_USER"),
+            "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
+            "database": os.getenv("SNOWFLAKE_DATABASE"),
+            "schema": os.getenv("SNOWFLAKE_SCHEMA"),
+        }
 
         # Only add role if it's set in .env
         role = os.getenv("SNOWFLAKE_ROLE")
         if role:
             connection_params["role"] = role
 
-        # Validate required params (role is optional)
-        required = ["account", "user", "password", "warehouse", "database", "schema"]
-        missing = [k for k in required if not connection_params.get(k)]
+        # Use programmatic access token if available, else password
+        token = os.getenv("SNOWFLAKE_TOKEN")
+        if token:
+            connection_params["authenticator"] = "programmatic_access_token"
+            connection_params["token"] = token
+        else:
+            connection_params["password"] = os.getenv("SNOWFLAKE_PASSWORD")
 
+        # Validate required params
+        required = ["account", "user", "warehouse", "database", "schema"]
+        missing = [k for k in required if not connection_params.get(k)]
         if missing:
             raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
         self.session = Session.builder.configs(connection_params).create()
-        self.logger.info("✅ Connected to Snowflake")
+        self.logger.info("Connected to Snowflake")
 
     def get_last_loaded_date(self, table: str, ticker: str,
                              date_column: str = 'DATE') -> Optional[pd.Timestamp]:
@@ -106,7 +112,7 @@ class SnowflakeClient:
         """
 
         result = self.session.sql(merge_sql).collect()
-        self.logger.info(f"✅ Merged {len(df)} rows into {target_table}")
+        self.logger.info(f"Merged {len(df)} rows into {target_table}")
         return result
 
     def execute(self, sql: str):
