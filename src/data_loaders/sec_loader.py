@@ -296,6 +296,10 @@ class SECFilingLoader(BaseDataLoader):
         if df.empty:
             return df
 
+        # Wrap filing_text in JSON for VARIANT column in Snowflake
+        import json
+        df['filing_text'] = df['filing_text'].apply(lambda t: json.dumps(str(t)))
+
         # Format dates
         df['filing_date'] = pd.to_datetime(df['filing_date']).dt.strftime('%Y-%m-%d')
         df['report_date'] = pd.to_datetime(df['report_date']).dt.strftime('%Y-%m-%d')

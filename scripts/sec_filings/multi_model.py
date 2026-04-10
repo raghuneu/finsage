@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 # Default models to compare
 DEFAULT_MODELS = [
     "meta.llama3-8b-instruct-v1:0",
-    "amazon.titan-text-express-v1",
     "mistral.mistral-7b-instruct-v0:2",
+    "meta.llama3-70b-instruct-v1:0",
 ]
 
 
