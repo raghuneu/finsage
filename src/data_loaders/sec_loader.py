@@ -12,6 +12,7 @@ import os
 from typing import Optional, Dict
 import json
 from pathlib import Path
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 class SECFilingLoader(BaseDataLoader):
     """Load SEC filings from EDGAR for LLM analysis"""
@@ -19,7 +20,7 @@ class SECFilingLoader(BaseDataLoader):
     def __init__(self, sf_client):
         super().__init__(sf_client)
         self.base_url = 'https://data.sec.gov'
-        self.user_agent = os.getenv('SEC_USER_AGENT', 'University research@university.edu')
+        self.user_agent = os.getenv('SEC_USER_AGENT', 'FinSage NEU vedanarayanan.s@northeastern.edu')
         self.headers = {
             'User-Agent': self.user_agent,
             'Accept-Encoding': 'gzip, deflate',
@@ -130,7 +131,12 @@ class SECFilingLoader(BaseDataLoader):
         common_ciks = {
             'AAPL': '0000320193',
             'MSFT': '0000789019',
-            'GOOGL': '0001652044'
+            'GOOGL': '0001652044',
+            'TSLA': '0001318605',
+            'JPM': '0000019617',
+            'AMZN': '0001018724',
+            'NVDA': '0001045810',
+            'META': '0001326801',
         }
 
         if ticker in common_ciks:
@@ -143,6 +149,7 @@ class SECFilingLoader(BaseDataLoader):
         self.logger.error(f"❌ Could not find CIK for {ticker}")
         return None
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
     def fetch_data(self, ticker: str, form_types=None, max_filings=3, **kwargs) -> pd.DataFrame:
         """Fetch recent SEC filings for a ticker"""
         if form_types is None:
@@ -295,6 +302,10 @@ class SECFilingLoader(BaseDataLoader):
 
         if df.empty:
             return df
+
+        # Wrap filing_text in JSON for VARIANT column in Snowflake
+        import json
+        df['filing_text'] = df['filing_text'].apply(lambda t: json.dumps(str(t)))
 
         # Format dates
         df['filing_date'] = pd.to_datetime(df['filing_date']).dt.strftime('%Y-%m-%d')

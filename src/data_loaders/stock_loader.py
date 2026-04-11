@@ -2,11 +2,14 @@
 
 import yfinance as yf
 import pandas as pd
+from tenacity import retry, stop_after_attempt, wait_exponential
 from .base_loader import BaseDataLoader
+
 
 class StockPriceLoader(BaseDataLoader):
     """Load stock prices from Yahoo Finance"""
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
     def fetch_data(self, ticker: str, **kwargs) -> pd.DataFrame:
         """
         Fetch stock data with incremental loading

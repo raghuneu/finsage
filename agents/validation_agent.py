@@ -20,6 +20,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from snowflake_connection import get_session
+from agents.vision_utils import vision_critique as _vision_critique
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +99,13 @@ def run_rule_checks(chart: dict) -> list:
 
 def run_vlm_check(session, chart: dict) -> dict:
     """
-    Use pixtral-large to evaluate chart quality for publication readiness.
+    Use VLM to evaluate chart quality for publication readiness.
+    Uses Gemini (real image) if available, Cortex text-only as fallback.
     Returns dict with passed (bool), score (0-10), and feedback.
     """
     chart_id = chart.get("chart_id", "unknown")
     title = chart.get("title", "financial chart")
+    data_summary = chart.get("data_summary", {})
 
     prompt = (
         f"You are a senior equity research editor reviewing a '{title}' chart "
@@ -121,15 +124,10 @@ def run_vlm_check(session, chart: dict) -> dict:
     )
 
     try:
-        safe_prompt = prompt.replace("'", "\\'")
-        sql = f"""
-            SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                '{CORTEX_MODEL_VLM}',
-                '{safe_prompt}'
-            ) AS result
-        """
-        rows = session.sql(sql).collect()
-        response = rows[0]["RESULT"].strip() if rows and rows[0]["RESULT"] else ""
+        response = _vision_critique(
+            session, chart.get("file_path", ""), prompt,
+            data_summary=data_summary, model=CORTEX_MODEL_VLM
+        )
 
         # Parse response
         passed = "APPROVED" in response.upper()
@@ -157,7 +155,6 @@ def run_vlm_check(session, chart: dict) -> dict:
 
     except Exception as e:
         logger.warning("VLM check failed for %s: %s — defaulting to PASS", chart_id, e)
-        # Default to pass if VLM unavailable — rule checks already caught hard failures
         return {
             "passed": True,
             "score": 7.0,
@@ -240,10 +237,11 @@ def validate_all_charts(session, charts: list) -> list:
             # Import here to avoid circular import
             from agents.chart_agent import CHART_DEFINITIONS, execute_chart_code
             defn = CHART_DEFINITIONS.get(chart["chart_id"])
-            if defn:
+            df = chart.get("_df")
+            if defn and df is not None:
                 success = execute_chart_code(
                     defn["fallback_code"],
-                    chart.get("_df"),  # only available if passed through
+                    df,
                     chart["file_path"]
                 )
                 if success:
@@ -251,6 +249,11 @@ def validate_all_charts(session, charts: list) -> list:
                     logger.info("Re-render result for %s: %s",
                                 chart["chart_id"],
                                 "✅ PASSED" if result["validated"] else "❌ STILL FAILED")
+            elif defn and df is None:
+                logger.warning(
+                    "Cannot re-render %s — DataFrame not available (loaded from manifest?)",
+                    chart["chart_id"]
+                )
 
         validated.append(result)
 

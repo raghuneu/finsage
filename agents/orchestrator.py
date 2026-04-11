@@ -16,6 +16,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import json
 import logging
@@ -52,6 +53,11 @@ COMPANY_NAMES = {
     "TSLA":  "Tesla Inc.",
     "GOOGL": "Alphabet Inc.",
     "JPM":   "JPMorgan Chase & Co.",
+    "AMZN":  "Amazon.com Inc.",
+    "NVDA":  "NVIDIA Corporation",
+    "META":  "Meta Platforms Inc.",
+    "BAC":   "Bank of America Corp.",
+    "GS":    "Goldman Sachs Group Inc.",
 }
 
 
@@ -214,7 +220,10 @@ def generate_report_pipeline(
     Returns:
         Dict with pdf_path, elapsed_seconds, and stage summaries
     """
-    ticker = ticker.upper()
+    ticker = ticker.upper().strip()
+    if not re.match(r"^[A-Z]{1,5}$", ticker):
+        raise ValueError(f"Invalid ticker symbol: {ticker!r}. Must be 1-5 uppercase letters.")
+
     start_time = datetime.now()
 
     print("\n" + "═" * 60)
@@ -253,19 +262,26 @@ def generate_report_pipeline(
         # ── Stage 2: Validation ──────────────────────────────
         validated_charts = stage_validation(session, charts)
 
-        # Warn if charts failed validation but continue
+        # Filter failed charts — only pass validated ones to analysis/report
+        passing_charts = [c for c in validated_charts if c.get("validated")]
         failed = [c for c in validated_charts if not c.get("validated")]
+
         if failed:
             logger.warning(
-                "%d chart(s) failed validation but will still be included: %s",
+                "%d chart(s) failed validation and will be excluded: %s",
                 len(failed), [c["chart_id"] for c in failed]
             )
 
-        # ── Stage 3: Analysis ────────────────────────────────
-        analysis = stage_analysis(session, validated_charts, ticker)
+        if not passing_charts:
+            raise RuntimeError(
+                f"All {len(validated_charts)} charts failed validation — cannot generate report"
+            )
 
-        # ── Stage 4: Report ──────────────────────────────────
-        pdf_path = stage_report(ticker, validated_charts, analysis, run_dir)
+        # ── Stage 3: Analysis (only passing charts) ──────────
+        analysis = stage_analysis(session, passing_charts, ticker)
+
+        # ── Stage 4: Report (only passing charts) ────────────
+        pdf_path = stage_report(ticker, passing_charts, analysis, run_dir)
 
     finally:
         session.close()

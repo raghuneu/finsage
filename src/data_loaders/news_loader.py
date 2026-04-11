@@ -4,7 +4,9 @@ import os
 import httpx
 import pandas as pd
 import uuid
+from tenacity import retry, stop_after_attempt, wait_exponential
 from .base_loader import BaseDataLoader
+
 
 class NewsLoader(BaseDataLoader):
     """Load news articles from NewsAPI"""
@@ -15,6 +17,7 @@ class NewsLoader(BaseDataLoader):
         if not self.api_key:
             self.logger.warning("⚠️  NEWSAPI_KEY not set - news loading will fail")
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
     def fetch_data(self, ticker: str, **kwargs) -> pd.DataFrame:
         """
         Fetch news with incremental loading
