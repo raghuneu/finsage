@@ -1,13 +1,34 @@
 """Stock price loader - refactored from load_sample_stock_data.py"""
 
+import logging
+import time
+
 import yfinance as yf
 import pandas as pd
+from requests.exceptions import HTTPError, ConnectionError, Timeout
+from tenacity import (
+    retry, stop_after_attempt, wait_exponential,
+    retry_if_exception, before_sleep_log,
+)
+
 from .base_loader import BaseDataLoader
+
+_logger = logging.getLogger(__name__)
+_RETRY_EXCEPTIONS = (HTTPError, ConnectionError, Timeout)
+
 
 class StockPriceLoader(BaseDataLoader):
     """Load stock prices from Yahoo Finance"""
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=2, max=30),
+        retry=retry_if_exception(lambda e: isinstance(e, _RETRY_EXCEPTIONS)),
+        before_sleep=before_sleep_log(_logger, logging.WARNING),
+    )
     def fetch_data(self, ticker: str, **kwargs) -> pd.DataFrame:
+        # yfinance rate-limit courtesy: 0.5s gap between ticker fetches
+        time.sleep(0.5)
         """
         Fetch stock data with incremental loading
         Uses your exact pattern from original script

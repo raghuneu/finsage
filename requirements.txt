@@ -1,22 +1,40 @@
 # Core dependencies
-snowflake-snowpark-python
-snowflake-connector-python[pandas]
-dbt-snowflake
+snowflake-snowpark-python>=1.11.0
+snowflake-connector-python[pandas]>=3.6.0
+dbt-snowflake>=1.7.0
 
 # Data sources
-yfinance
-requests
-httpx
-beautifulsoup4
+yfinance>=0.2.36
+requests>=2.31.0
+httpx>=0.27.0
+beautifulsoup4>=4.12.0
 
 # Data processing
-pandas
+pandas>=2.1.0
 
 # Configuration
-python-dotenv
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
 
 # AWS
-boto3
+boto3>=1.34.0
 
 # Vision (Gemini 2.0 Flash for VLM chart critique)
-google-genai
+google-genai>=1.0.0
+
+# Retry logic
+tenacity>=8.2.0
+
+# Charts + PDF
+matplotlib>=3.8.0
+reportlab>=4.1.0
+Pillow>=10.0.0
+
+# Frontend
+streamlit>=1.32.0
+plotly>=5.18.0
+colorlog>=6.8.0
+
+# Testing
+pytest>=8.0.0
+pytest-cov>=4.1.0

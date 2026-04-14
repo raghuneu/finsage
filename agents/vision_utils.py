@@ -49,7 +49,7 @@ def cortex_complete(session, prompt: str, model: str = "mistral-large") -> str:
     Call Snowflake Cortex COMPLETE() with the given prompt.
     Returns the generated text string.
     """
-    safe = prompt.replace("'", "\\'")
+    safe = prompt.replace("'", "''")
     sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{model}', '{safe}') AS r"
     rows = session.sql(sql).collect()
     raw = rows[0]["R"].strip() if rows and rows[0]["R"] else ""

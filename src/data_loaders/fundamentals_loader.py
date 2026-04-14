@@ -1,8 +1,20 @@
 """Fundamentals loader - fetches multi-quarter data from Yahoo Finance"""
 
+import logging
+import time
+
 import yfinance as yf
 import pandas as pd
+from requests.exceptions import HTTPError, ConnectionError, Timeout
+from tenacity import (
+    retry, stop_after_attempt, wait_exponential,
+    retry_if_exception, before_sleep_log,
+)
+
 from .base_loader import BaseDataLoader
+
+_logger = logging.getLogger(__name__)
+_RETRY_EXCEPTIONS = (HTTPError, ConnectionError, Timeout)
 
 
 class FundamentalsLoader(BaseDataLoader):
@@ -14,8 +26,16 @@ class FundamentalsLoader(BaseDataLoader):
         q = (date.month - 1) // 3 + 1
         return f"Q{q} {date.year}"
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=2, max=30),
+        retry=retry_if_exception(lambda e: isinstance(e, _RETRY_EXCEPTIONS)),
+        before_sleep=before_sleep_log(_logger, logging.WARNING),
+    )
     def fetch_data(self, ticker: str, **kwargs) -> pd.DataFrame:
         """Fetch multi-quarter fundamentals from Yahoo Finance"""
+        # yfinance rate-limit courtesy: 0.5s gap between ticker fetches
+        time.sleep(0.5)
         yf_ticker = yf.Ticker(ticker)
         info = yf_ticker.info
 

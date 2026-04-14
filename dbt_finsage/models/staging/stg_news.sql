@@ -18,20 +18,10 @@ cleaned AS (
         ingested_at,
         data_quality_score,
 
-        -- ── Cortex ML sentiment (-1.0 to +1.0) ───────────────
-        -- Feed title + description for richer signal than title alone
-        SNOWFLAKE.CORTEX.SENTIMENT(
-            COALESCE(title, '') || ' ' || COALESCE(description, '')
-        )                                           AS sentiment_score,
-
-        -- ── Derived sentiment label ───────────────────────────
+        SNOWFLAKE.CORTEX.SENTIMENT(COALESCE(description, title)) AS sentiment_score,
         CASE
-            WHEN SNOWFLAKE.CORTEX.SENTIMENT(
-                COALESCE(title, '') || ' ' || COALESCE(description, '')
-            ) >= 0.2  THEN 'positive'
-            WHEN SNOWFLAKE.CORTEX.SENTIMENT(
-                COALESCE(title, '') || ' ' || COALESCE(description, '')
-            ) <= -0.2 THEN 'negative'
+            WHEN SNOWFLAKE.CORTEX.SENTIMENT(COALESCE(description, title)) > 0.1 THEN 'positive'
+            WHEN SNOWFLAKE.CORTEX.SENTIMENT(COALESCE(description, title)) < -0.1 THEN 'negative'
             ELSE 'neutral'
         END                                         AS sentiment,
 

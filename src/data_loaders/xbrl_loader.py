@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base_loader import BaseDataLoader
 
@@ -38,7 +39,7 @@ class XBRLLoader(BaseDataLoader):
     def __init__(self, sf_client):
         super().__init__(sf_client)
         self.user_agent = os.getenv(
-            'SEC_USER_AGENT', 'finsage research@northeastern.edu'
+            'SEC_USER_AGENT', 'FinSage NEU vedanarayanan.s@northeastern.edu'
         )
         self.headers = {"User-Agent": self.user_agent}
         self.cik_cache = {}
@@ -98,6 +99,7 @@ class XBRLLoader(BaseDataLoader):
 
     # ── BaseDataLoader implementation ───────────────────────
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
     def fetch_data(self, ticker: str, **kwargs) -> pd.DataFrame:
         """Fetch XBRL companyfacts from SEC EDGAR"""
         cik = self._get_cik(ticker)
@@ -203,4 +205,10 @@ class XBRLLoader(BaseDataLoader):
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
         df['ingested_at'] = pd.to_datetime(df['ingested_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        # Deduplicate on merge keys — keep latest filed record to prevent MERGE failures
+        merge_keys = [k.lower() for k in self.get_merge_keys()]
+        if 'filed_date' in df.columns:
+            df = df.sort_values('filed_date', ascending=False).drop_duplicates(
+                subset=merge_keys, keep='first'
+            )
         return df
