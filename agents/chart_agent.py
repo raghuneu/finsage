@@ -467,29 +467,41 @@ ax.set_ylim(price_min - padding, price_max + padding)
             f"Requirements: volume bars (#94a3b8 alpha=0.6) on left axis, "
             f"volatility_30d_pct line (#ef4444 linewidth=2) on right axis, "
             f"ax.set_facecolor('#f8f9fa'), gridlines, both axes labeled, "
-            f"title fontsize=14 bold, combined legend, figsize=(14,6)."
+            f"title fontsize=14 bold, combined legend, figsize=(14,6). "
+            f"MUST show dual axes: left=Volume in Millions (divide raw volume by 1e6), "
+            f"right=Volatility %. MUST NOT use scientific notation. "
+            f"MUST show both bar chart (volume) and line chart (volatility) on same figure. "
+            f"Use FuncFormatter to format left y-axis as 'Xm' and right y-axis as 'X.X%'."
         ),
         "fallback_code": """
-import matplotlib.dates as mdates
+from matplotlib.ticker import MaxNLocator, FuncFormatter
 fig, ax1 = plt.subplots(figsize=(14, 6))
 ax1.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 df['date'] = pd.to_datetime(df['date'])
 ax2 = ax1.twinx()
-ax1.bar(df['date'], df['volume'] / 1e6, color='#94a3b8', alpha=0.6, width=1.5, label='Volume (M)')
+vol_m = df['volume'] / 1e6
+ax1.bar(df['date'], vol_m, color='#94a3b8', alpha=0.6, width=1.5, label='Volume (M)')
 if df['volatility_30d_pct'].notna().any():
     ax2.plot(df['date'], df['volatility_30d_pct'], color='#ef476f', linewidth=2, label='Volatility 30D %')
 ax1.set_title('Volume & 30-Day Volatility', fontsize=14, fontweight='bold')
 ax1.set_xlabel('Date', fontsize=11)
 ax1.set_ylabel('Volume (Millions)', fontsize=11)
 ax2.set_ylabel('Volatility 30D %', fontsize=11)
+# Explicit y-limits + formatters (no scientific notation)
+ax1.set_ylim(0, float(vol_m.max()) * 1.15)
+ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:.0f}M'))
+vol_series = df['volatility_30d_pct'].dropna()
+if not vol_series.empty:
+    ax2.set_ylim(0, float(vol_series.max()) * 1.2)
+    ax2.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:.1f}%'))
 ax1.grid(True, color='#e0e0e0', alpha=0.7, linestyle='--', linewidth=0.5)
 lines1, labels1 = ax1.get_legend_handles_labels()
 lines2, labels2 = ax2.get_legend_handles_labels()
 ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
-ax1.xaxis.set_major_locator(mdates.WeekdayLocator(interval=2))
+ax1.xaxis.set_major_locator(MaxNLocator(8))
 ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-plt.xticks(rotation=45, ha='right', fontsize=9)
+plt.setp(ax1.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=9)
 """,
     },
 
@@ -511,15 +523,18 @@ plt.xticks(rotation=45, ha='right', fontsize=9)
         ),
         "iter3_prompt": lambda ticker, df, code, critique: (
             f"Create PROFESSIONAL {ticker} revenue/income growth chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: grouped bars (revenue=#00b4d8, net_income=#06d6a0), "
+            f"Requirements: grouped bars ONLY (revenue_growth=#00b4d8, net_income_growth=#06d6a0), "
             f"color bars #ef476f if negative, zero reference line, "
-            f"revenue amounts as line on right axis (#94a3b8), "
-            f"ax.set_facecolor('#f8f9fa'), value labels on bars, "
-            f"title fontsize=14 bold, figsize=(14,6)."
+            f"ax.set_facecolor('#f8f9fa'), data labels on top of each bar showing the %, "
+            f"title fontsize=14 bold, figsize=(14,6). "
+            f"MUST show only percentage values on single y-axis labeled 'Growth (YoY %)'. "
+            f"MUST NOT plot absolute revenue values. MUST NOT use a secondary y-axis. "
+            f"MUST NOT use scientific notation. Use FormatStrFormatter('%.1f%%') on y-axis."
         ),
         "fallback_code": """
-fig, ax1 = plt.subplots(figsize=(14, 6))
-ax1.set_facecolor('#f8f9fa')
+from matplotlib.ticker import FormatStrFormatter
+fig, ax = plt.subplots(figsize=(14, 6))
+ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 
 # Use QoQ growth if YoY is mostly NaN
@@ -529,33 +544,35 @@ growth_col = 'revenue_growth_qoq_pct' if use_qoq else 'revenue_growth_yoy_pct'
 ni_col = 'net_income_growth_qoq_pct' if use_qoq else 'net_income_growth_yoy_pct'
 period_label = 'QoQ' if use_qoq else 'YoY'
 
-x = range(len(df))
+x = list(range(len(df)))
 width = 0.35
 rev_vals = df[growth_col].fillna(0) if growth_col in df.columns else df['revenue_growth_yoy_pct'].fillna(0)
 ni_vals = df[ni_col].fillna(0) if ni_col in df.columns else df['net_income_growth_yoy_pct'].fillna(0)
 rev_colors = ['#00b4d8' if v >= 0 else '#ef476f' for v in rev_vals]
 inc_colors = ['#06d6a0' if v >= 0 else '#ef476f' for v in ni_vals]
-ax1.bar([i - width/2 for i in x], rev_vals, width, color=rev_colors, alpha=0.8, label=f'Revenue Growth {period_label} %')
-ax1.bar([i + width/2 for i in x], ni_vals, width, color=inc_colors, alpha=0.8, label=f'Net Income Growth {period_label} %')
-ax1.axhline(y=0, color='black', linewidth=0.8, linestyle='-')
+bars1 = ax.bar([i - width/2 for i in x], rev_vals, width, color=rev_colors, alpha=0.85,
+               label=f'Revenue Growth {period_label} %')
+bars2 = ax.bar([i + width/2 for i in x], ni_vals, width, color=inc_colors, alpha=0.85,
+               label=f'Net Income Growth {period_label} %')
+ax.axhline(y=0, color='black', linewidth=0.8, linestyle='-')
 
-# Add revenue amounts as line on right axis
-ax2 = ax1.twinx()
-if df['revenue'].notna().any():
-    ax2.plot(list(x), df['revenue'] / 1e9, color='#94a3b8', linewidth=2, marker='s', markersize=6, label='Revenue ($B)', zorder=5)
-    for i, v in enumerate(df['revenue']):
-        if pd.notna(v):
-            ax2.annotate(f'${v/1e9:.1f}B', (i, v/1e9), textcoords='offset points', xytext=(0, 10), ha='center', fontsize=8, color='#64748b')
-    ax2.set_ylabel('Revenue ($B)', fontsize=11, color='#94a3b8')
+# Data labels on top of bars
+for bar, v in zip(bars1, rev_vals):
+    ax.annotate(f'{v:.1f}%', (bar.get_x() + bar.get_width()/2, v),
+                textcoords='offset points', xytext=(0, 4 if v >= 0 else -12),
+                ha='center', fontsize=8, color='#0f172a')
+for bar, v in zip(bars2, ni_vals):
+    ax.annotate(f'{v:.1f}%', (bar.get_x() + bar.get_width()/2, v),
+                textcoords='offset points', xytext=(0, 4 if v >= 0 else -12),
+                ha='center', fontsize=8, color='#0f172a')
 
-ax1.set_xticks(list(x))
-ax1.set_xticklabels(df['fiscal_quarter'].tolist(), rotation=30, fontsize=9, ha='right')
-ax1.set_title(f'Revenue & Net Income Growth ({period_label} %)', fontsize=14, fontweight='bold')
-ax1.set_ylabel('Growth %', fontsize=11)
-ax1.grid(True, axis='y', color='#e0e0e0', alpha=0.7, linestyle='--')
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=9, framealpha=0.9, loc='upper left')
+ax.set_xticks(x)
+ax.set_xticklabels(df['fiscal_quarter'].tolist(), rotation=30, fontsize=9, ha='right')
+ax.set_title(f'Revenue & Net Income Growth ({period_label} %)', fontsize=14, fontweight='bold')
+ax.set_ylabel('Growth (YoY %)' if not use_qoq else 'Growth (QoQ %)', fontsize=11)
+ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f%%'))
+ax.grid(True, axis='y', color='#e0e0e0', alpha=0.7, linestyle='--')
+ax.legend(fontsize=9, framealpha=0.9, loc='upper left')
 """,
     },
 
@@ -624,15 +641,27 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
             f"fill_between negative sentiment (#ef4444 alpha=0.2), "
             f"sentiment_score_7d_avg line (#2563eb linewidth=2), "
             f"zero reference line (black dashed), ax.set_facecolor('#f8f9fa'), "
-            f"y-axis range -1 to 1, title fontsize=14 bold, figsize=(14,6)."
+            f"y-axis range -1 to 1, title fontsize=14 bold, figsize=(14,6). "
+            f"MUST show dates from 2025-2026 only. If x-axis shows 1969 or 1970, "
+            f"timestamps are in milliseconds — use pd.to_datetime(df['news_date'], unit='ms'). "
+            f"MUST filter to last 60 days: cutoff = pd.Timestamp.now() - pd.Timedelta(days=60); "
+            f"df = df[df['news_date'] >= cutoff]."
         ),
         "fallback_code": """
+from matplotlib.ticker import MaxNLocator
 fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
-df['news_date'] = pd.to_datetime(df['news_date'])
-# Limit to last 60 days so x-axis is readable
-cutoff = df['news_date'].max() - pd.Timedelta(days=60)
+# Robust date parsing — guard against epoch (seconds or ms) stored as int/float
+if df['news_date'].dtype in ('int64', 'float64'):
+    if df['news_date'].mean() > 1e10:
+        df['news_date'] = pd.to_datetime(df['news_date'], unit='ms')
+    else:
+        df['news_date'] = pd.to_datetime(df['news_date'], unit='s')
+else:
+    df['news_date'] = pd.to_datetime(df['news_date'])
+# Filter to last 60 days relative to now
+cutoff = pd.Timestamp.now() - pd.Timedelta(days=60)
 df = df[df['news_date'] >= cutoff].sort_values('news_date').reset_index(drop=True)
 ax.fill_between(df['news_date'], 0, df['sentiment_score_7d_avg'].fillna(0),
                 where=df['sentiment_score_7d_avg'].fillna(0) >= 0,
