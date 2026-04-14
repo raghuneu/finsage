@@ -72,6 +72,19 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 # Signal helpers
 # ──────────────────────────────────────────────────────────────
 
+def _fmt_money(v) -> str:
+    """Format a raw money amount as $B / $M string."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if v > 1e9:
+        return f"${v/1e9:.1f}B"
+    if v > 1e6:
+        return f"${v/1e6:.1f}M"
+    return f"${v:,.0f}"
+
+
 def get_signal(chart_id: str, data_summary: dict) -> tuple:
     """
     Derive a BULLISH / BEARISH / NEUTRAL signal from chart data_summary.
@@ -192,7 +205,7 @@ def build_styles():
             "cover_subtitle",
             fontName="Helvetica",
             fontSize=13,
-            textColor=C_WHITE,
+            textColor=C_DARK,
             alignment=TA_CENTER,
             spaceAfter=4,
         ),
@@ -200,7 +213,7 @@ def build_styles():
             "cover_date",
             fontName="Helvetica",
             fontSize=11,
-            textColor=C_NEUTRAL,
+            textColor=C_GRAY,
             alignment=TA_CENTER,
         ),
         "section_header": ParagraphStyle(
@@ -281,32 +294,53 @@ def build_styles():
 # ──────────────────────────────────────────────────────────────
 
 def draw_cover_bg(canvas, doc):
-    """Full dark background for cover page with distinct top/bottom bars."""
-    canvas.saveState()
-    # Base mid-dark
-    canvas.setFillColor(colors.HexColor("#0f2027"))
-    canvas.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    """Cover page chrome: dark header + footer bars on a white page.
 
-    # Top dark header bar (#0f2027, darker inset)
-    canvas.setFillColor(colors.HexColor("#091318"))
-    canvas.rect(0, PAGE_H - 28 * mm, PAGE_W, 28 * mm, fill=1, stroke=0)
+    Draw rects FIRST with both fill=1 and stroke=1, then text on top.
+    """
+    canvas.saveState()
+    report_date = getattr(doc, "report_date", datetime.now().strftime("%B %d, %Y"))
+
+    header_h = 22 * mm
+    footer_h = 18 * mm
+
+    # Header rect (fill + stroke, both dark)
+    canvas.setFillColor(C_DARK)
+    canvas.setStrokeColor(C_DARK)
+    canvas.rect(0, PAGE_H - header_h, PAGE_W, header_h, fill=1, stroke=1)
     # Teal divider under header
     canvas.setFillColor(C_TEAL)
-    canvas.rect(0, PAGE_H - 28 * mm - 2, PAGE_W, 2, fill=1, stroke=0)
+    canvas.setStrokeColor(C_TEAL)
+    canvas.rect(0, PAGE_H - header_h - 2, PAGE_W, 2, fill=1, stroke=1)
 
-    # Bottom footer bar
-    canvas.setFillColor(colors.HexColor("#091318"))
-    canvas.rect(0, 0, PAGE_W, 22 * mm, fill=1, stroke=0)
+    # Header text ON TOP of rect
+    canvas.setFillColor(C_WHITE)
+    canvas.setFont("Helvetica", 10)
+    canvas.drawString(MARGIN, PAGE_H - header_h + 8 * mm,
+                      "FinSage | AI-Powered Financial Research")
+    canvas.drawRightString(PAGE_W - MARGIN, PAGE_H - header_h + 8 * mm,
+                           report_date)
+
+    # Footer rect
+    canvas.setFillColor(C_DARK)
+    canvas.setStrokeColor(C_DARK)
+    canvas.rect(0, 0, PAGE_W, footer_h, fill=1, stroke=1)
     canvas.setFillColor(C_TEAL)
-    canvas.rect(0, 22 * mm, PAGE_W, 2, fill=1, stroke=0)
+    canvas.setStrokeColor(C_TEAL)
+    canvas.rect(0, footer_h, PAGE_W, 2, fill=1, stroke=1)
 
-    # Footer text
+    # Footer text ON TOP of rect
+    canvas.setFillColor(C_WHITE)
+    canvas.setFont("Helvetica", 9)
+    canvas.drawCentredString(
+        PAGE_W / 2, footer_h / 2 + 3,
+        f"EQUITY RESEARCH REPORT  \u2014  {report_date}"
+    )
+    canvas.setFillColor(colors.HexColor("#aaaaaa"))
     canvas.setFont("Helvetica", 8)
-    canvas.setFillColor(C_NEUTRAL)
-    canvas.drawString(MARGIN, 8 * mm, "FinSage — AI-Powered Financial Research")
-    canvas.drawRightString(
-        PAGE_W - MARGIN, 8 * mm,
-        f"Generated {datetime.now().strftime('%B %d, %Y')}"
+    canvas.drawCentredString(
+        PAGE_W / 2, footer_h / 2 - 10,
+        "AI-generated. Not financial advice."
     )
     canvas.restoreState()
 
@@ -388,14 +422,14 @@ def build_cover(ticker: str, company_name: str, styles: dict,
     elements = []
 
     # Space for dark header bar drawn by canvas callback
-    elements.append(Spacer(1, 34 * mm))
+    elements.append(Spacer(1, 30 * mm))
 
     # FinSage wordmark
     elements.append(Paragraph(
         '<font color="#00b4d8" size="11"><b>FinSage</b></font>'
-        '<font color="#94a3b8" size="9">  |  AI-Powered Financial Research</font>',
+        '<font color="#64748b" size="9">  |  AI-Powered Financial Research</font>',
         ParagraphStyle("wm", fontName="Helvetica", fontSize=11,
-                       textColor=C_WHITE, alignment=TA_CENTER)
+                       textColor=C_BLACK, alignment=TA_CENTER)
     ))
     elements.append(Spacer(1, 16 * mm))
 
@@ -462,12 +496,12 @@ def build_cover(ticker: str, company_name: str, styles: dict,
 
         def _box(label, val):
             return Table(
-                [[Paragraph(f'<font color="#94a3b8" size="8">{label}</font>',
+                [[Paragraph(label,
                             ParagraphStyle("bl", fontName="Helvetica", fontSize=8,
-                                           textColor=C_NEUTRAL, alignment=TA_CENTER))],
-                 [Paragraph(f'<font color="#ffffff" size="16"><b>{val}</b></font>',
+                                           textColor=C_GRAY, alignment=TA_CENTER))],
+                 [Paragraph(f"<b>{val}</b>",
                             ParagraphStyle("bv", fontName="Helvetica-Bold", fontSize=16,
-                                           textColor=C_WHITE, alignment=TA_CENTER))]],
+                                           textColor=C_DARK, alignment=TA_CENTER))]],
                 colWidths=[(PAGE_W - 2 * MARGIN) * 0.30],
             )
 
@@ -478,10 +512,10 @@ def build_cover(ticker: str, company_name: str, styles: dict,
             colWidths=[(PAGE_W - 2 * MARGIN) / 3] * 3,
         )
         box_row.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1e293b")),
-            ("BOX", (0, 0), (0, 0), 0.5, colors.HexColor("#334155")),
-            ("BOX", (1, 0), (1, 0), 0.5, colors.HexColor("#334155")),
-            ("BOX", (2, 0), (2, 0), 0.5, colors.HexColor("#334155")),
+            ("BACKGROUND", (0, 0), (-1, -1), C_LIGHT_GRAY),
+            ("BOX", (0, 0), (0, 0), 0.5, C_DIVIDER),
+            ("BOX", (1, 0), (1, 0), 0.5, C_DIVIDER),
+            ("BOX", (2, 0), (2, 0), 0.5, C_DIVIDER),
             ("TOPPADDING", (0, 0), (-1, -1), 14),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -497,8 +531,8 @@ def build_toc(charts: list, styles: dict) -> list:
     elements = []
     elements.append(Paragraph("Table of Contents", styles["page_title"]))
     elements.append(HRFlowable(
-        width="100%", thickness=1.5,
-        color=C_TEAL, spaceAfter=16
+        width="100%", thickness=2,
+        color=C_TEAL, spaceAfter=12
     ))
 
     toc_style = ParagraphStyle(
@@ -569,27 +603,41 @@ def build_toc(charts: list, styles: dict) -> list:
 
     elements.append(Spacer(1, 20 * mm))
 
-    # Pipeline methodology note
-    elements.append(HRFlowable(
-        width="100%", thickness=0.5,
-        color=C_DIVIDER, spaceAfter=8
-    ))
-    method_style = ParagraphStyle(
-        "method_note",
-        fontName="Helvetica",
-        fontSize=9,
-        textColor=C_GRAY,
-        leading=14,
-        alignment=TA_JUSTIFY,
+    # Methodology callout box (teal left accent, gray background)
+    style_small_gray = ParagraphStyle(
+        "meth_small", fontName="Helvetica", fontSize=9,
+        textColor=colors.HexColor("#555555"), leading=14, alignment=TA_JUSTIFY,
     )
-    elements.append(Paragraph(
-        "<b>Methodology:</b> This report was generated using the FinSage CAVM "
+    methodology_text = (
+        "This report was generated using the FinSage CAVM "
         "(Chart-Analysis-Validation-Model) pipeline. Charts undergo a 3-iteration "
         "VLM refinement loop using Snowflake Cortex pixtral-large for visual critique. "
         "Analysis is powered by Cortex mistral-large with grounding in Snowflake ANALYTICS "
-        "layer data. SEC filing summaries leverage Cortex SUMMARIZE on 10-K/10-Q filings.",
-        method_style
-    ))
+        "layer data. SEC filing summaries leverage Cortex SUMMARIZE on 10-K/10-Q filings."
+    )
+    content_w = PAGE_W - 2 * MARGIN
+    meth_table = Table(
+        [["",
+          Paragraph(
+              '<b><font color="#00b4d8">Methodology</font></b><br/>' + methodology_text,
+              style_small_gray,
+          )]],
+        colWidths=[6, content_w - 6],
+    )
+    meth_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 0), C_TEAL),
+        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#f0f0f0")),
+        ("TOPPADDING", (1, 0), (1, 0), 8),
+        ("BOTTOMPADDING", (1, 0), (1, 0), 8),
+        ("LEFTPADDING", (1, 0), (1, 0), 10),
+        ("RIGHTPADDING", (1, 0), (1, 0), 10),
+        ("LEFTPADDING", (0, 0), (0, 0), 0),
+        ("RIGHTPADDING", (0, 0), (0, 0), 0),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    elements.append(Spacer(1, 20))
+    elements.append(KeepTogether(meth_table))
+    logger.info("TOC story items: %d", len(elements))
 
     elements.append(PageBreak())
     return elements
@@ -678,9 +726,23 @@ def build_executive_summary(ticker: str, charts: list,
             width="100%", thickness=0.5,
             color=C_DIVIDER, spaceAfter=6
         ))
-        # Truncate to first 2-3 sentences for the exec summary
-        sentences = thesis.replace("\n", " ").split(". ")
-        brief = ". ".join(sentences[:3]).strip()
+        # Build a brief that preserves opening + first 2-3 numbered agreement points.
+        import re as _re
+        flat = _re.sub(r"\s+", " ", thesis).strip()
+        # Pull numbered bullets like "1. ... 2. ... 3. ..."
+        bullets = _re.findall(r"\b([1-9])\.\s+([^1-9][^.?!]*[.?!])", flat)
+        opening = flat.split(":")[0].strip()
+        if not opening.endswith((".", "?", "!")):
+            opening += "."
+        if bullets:
+            kept = " ".join(f"{n}. {txt.strip()}" for n, txt in bullets[:3])
+            brief = f"{opening}: {kept}"
+        else:
+            # Fallback: first 3 sentences or first 600 chars
+            sentences = [s.strip() for s in _re.split(r"(?<=[.!?])\s+", flat) if s.strip()]
+            brief = " ".join(sentences[:3]) if sentences else flat[:600]
+        if len(brief) > 900:
+            brief = brief[:900].rsplit(" ", 1)[0] + "…"
         if not brief.endswith("."):
             brief += "."
         brief += " (See Section 7 for full analysis.)"
@@ -821,7 +883,12 @@ def build_chart_section(chart: dict, analysis_text: str,
         metric_items = []
         for k, v in data_summary.items():
             label = k.replace("_", " ").title()
-            if isinstance(v, float):
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and k in (
+                "total_revenue", "net_income", "total_assets", "total_equity",
+                "operating_income", "revenue", "market_cap"
+            ):
+                val_str = _fmt_money(v)
+            elif isinstance(v, float):
                 val_str = f"{v:,.2f}"
             else:
                 val_str = str(v)
@@ -1593,6 +1660,7 @@ def build_pdf(
         subject=f"{ticker} Financial Analysis",
     )
     doc._finsage_ticker = ticker  # used by header callback
+    doc.report_date = datetime.now().strftime("%B %d, %Y")
 
     # ── Page templates ───────────────────────────────────────
     cover_frame = Frame(

@@ -508,18 +508,18 @@ plt.setp(ax1.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=9)
     "revenue_growth": {
         "title": "Revenue & Net Income Growth",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a grouped bar chart for {ticker} revenue growth. "
-            f"df has columns: fiscal_quarter, revenue, net_income, "
-            f"revenue_growth_qoq_pct, net_income_growth_qoq_pct, "
-            f"revenue_growth_yoy_pct, net_income_growth_yoy_pct. "
-            f"IMPORTANT: revenue_growth_yoy_pct may be mostly NaN. If so, use revenue_growth_qoq_pct instead. "
-            f"Also add revenue amounts as a line on a secondary y-axis. figsize=(12,5). "
-            f"Title: '{ticker} Revenue Growth'. x-axis: fiscal_quarter."
+            f"Generate a grouped bar chart for {ticker} YoY growth. "
+            f"df has columns: fiscal_quarter, revenue_growth_yoy_pct, net_income_growth_yoy_pct. "
+            f"Plot revenue_growth_yoy_pct and net_income_growth_yoy_pct as grouped bars. "
+            f"DO NOT use any _qoq_ columns. DO NOT use a secondary axis. figsize=(12,5). "
+            f"Title: 'Revenue & Net Income Growth (YoY %)'. "
+            f"y-axis label: 'Growth (YoY %)'. x-axis: fiscal_quarter."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} growth chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Add: net_income growth as second grouped bar, revenue amounts line on right axis, "
-            f"color coding (green=#06d6a0 positive, red=#ef476f negative), legend, axis labels."
+            f"Improve this {ticker} YoY growth chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Keep using revenue_growth_yoy_pct and net_income_growth_yoy_pct ONLY. "
+            f"Add: color coding (green=#06d6a0 positive, red=#ef476f negative), legend, axis labels. "
+            f"DO NOT switch to QoQ columns. DO NOT add a secondary y-axis."
         ),
         "iter3_prompt": lambda ticker, df, code, critique: (
             f"Create PROFESSIONAL {ticker} revenue/income growth chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
@@ -527,7 +527,9 @@ plt.setp(ax1.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=9)
             f"color bars #ef476f if negative, zero reference line, "
             f"ax.set_facecolor('#f8f9fa'), data labels on top of each bar showing the %, "
             f"title fontsize=14 bold, figsize=(14,6). "
-            f"MUST show only percentage values on single y-axis labeled 'Growth (YoY %)'. "
+            f"MUST plot revenue_growth_yoy_pct and net_income_growth_yoy_pct (NOT the QoQ columns). "
+            f"Title MUST be 'Revenue & Net Income Growth (YoY %)'. y-axis label MUST be 'Growth (YoY %)'. "
+            f"MUST show only percentage values on single y-axis. "
             f"MUST NOT plot absolute revenue values. MUST NOT use a secondary y-axis. "
             f"MUST NOT use scientific notation. Use FormatStrFormatter('%.1f%%') on y-axis."
         ),
@@ -537,23 +539,20 @@ fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 
-# Use QoQ growth if YoY is mostly NaN
-rev_yoy = df['revenue_growth_yoy_pct'].dropna()
-use_qoq = len(rev_yoy) < 2 and 'revenue_growth_qoq_pct' in df.columns
-growth_col = 'revenue_growth_qoq_pct' if use_qoq else 'revenue_growth_yoy_pct'
-ni_col = 'net_income_growth_qoq_pct' if use_qoq else 'net_income_growth_yoy_pct'
-period_label = 'QoQ' if use_qoq else 'YoY'
+# Always use YoY growth
+growth_col = 'revenue_growth_yoy_pct'
+ni_col = 'net_income_growth_yoy_pct'
 
 x = list(range(len(df)))
 width = 0.35
-rev_vals = df[growth_col].fillna(0) if growth_col in df.columns else df['revenue_growth_yoy_pct'].fillna(0)
-ni_vals = df[ni_col].fillna(0) if ni_col in df.columns else df['net_income_growth_yoy_pct'].fillna(0)
+rev_vals = df[growth_col].fillna(0)
+ni_vals = df[ni_col].fillna(0)
 rev_colors = ['#00b4d8' if v >= 0 else '#ef476f' for v in rev_vals]
 inc_colors = ['#06d6a0' if v >= 0 else '#ef476f' for v in ni_vals]
 bars1 = ax.bar([i - width/2 for i in x], rev_vals, width, color=rev_colors, alpha=0.85,
-               label=f'Revenue Growth {period_label} %')
+               label='Revenue Growth YoY %')
 bars2 = ax.bar([i + width/2 for i in x], ni_vals, width, color=inc_colors, alpha=0.85,
-               label=f'Net Income Growth {period_label} %')
+               label='Net Income Growth YoY %')
 ax.axhline(y=0, color='black', linewidth=0.8, linestyle='-')
 
 # Data labels on top of bars
@@ -568,8 +567,8 @@ for bar, v in zip(bars2, ni_vals):
 
 ax.set_xticks(x)
 ax.set_xticklabels(df['fiscal_quarter'].tolist(), rotation=30, fontsize=9, ha='right')
-ax.set_title(f'Revenue & Net Income Growth ({period_label} %)', fontsize=14, fontweight='bold')
-ax.set_ylabel('Growth (YoY %)' if not use_qoq else 'Growth (QoQ %)', fontsize=11)
+ax.set_title('Revenue & Net Income Growth (YoY %)', fontsize=14, fontweight='bold')
+ax.set_ylabel('Growth (YoY %)', fontsize=11)
 ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f%%'))
 ax.grid(True, axis='y', color='#e0e0e0', alpha=0.7, linestyle='--')
 ax.legend(fontsize=9, framealpha=0.9, loc='upper left')
