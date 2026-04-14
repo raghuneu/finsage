@@ -9,13 +9,13 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from utils.connections import get_snowflake, get_ticker
+from utils.connections import get_snowflake, render_sidebar
 from utils.styles import inject_css, create_plotly_template
 from utils.helpers import page_header, require_snowflake, section_header, safe_query, sanitize_ticker
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 session = get_snowflake()
-ticker = sanitize_ticker(get_ticker())
 TPL = create_plotly_template()
 
 page_header(f"SEC Filing Analysis -- {ticker}", "Document-level analysis of 10-K and 10-Q filings")
@@ -35,33 +35,27 @@ except Exception:
 filing_source = None
 df = None
 
-try:
-    df = session.sql(f"""
-        SELECT FILING_ID, FORM_TYPE, FILING_DATE, PERIOD_OF_REPORT,
-               COMPANY_NAME, MDA_WORD_COUNT, RISK_WORD_COUNT,
-               EXTRACTION_STATUS, DATA_QUALITY_SCORE
-        FROM RAW.RAW_SEC_FILING_DOCUMENTS
-        WHERE TICKER='{ticker}' ORDER BY FILING_DATE DESC
-    """).to_pandas()
-    if df is not None and not df.empty:
-        filing_source = "documents"
-except Exception:
-    df = None
+df = safe_query(session, f"""
+    SELECT FILING_ID, FORM_TYPE, FILING_DATE, PERIOD_OF_REPORT,
+           COMPANY_NAME, MDA_WORD_COUNT, RISK_WORD_COUNT,
+           EXTRACTION_STATUS, DATA_QUALITY_SCORE
+    FROM RAW.RAW_SEC_FILING_DOCUMENTS
+    WHERE TICKER='{ticker}' ORDER BY FILING_DATE DESC
+""")
+if df is not None and not df.empty:
+    filing_source = "documents"
 
 if df is None or df.empty:
-    try:
-        df = session.sql(f"""
-            SELECT DISTINCT CONCEPT, FORM_TYPE, FILED_DATE AS FILING_DATE,
-                   FISCAL_YEAR, FISCAL_PERIOD, VALUE,
-                   DATA_QUALITY_SCORE
-            FROM RAW.RAW_SEC_FILINGS
-            WHERE TICKER='{ticker}' ORDER BY FILED_DATE DESC
-            LIMIT 50
-        """).to_pandas()
-        if df is not None and not df.empty:
-            filing_source = "filings"
-    except Exception:
-        df = None
+    df = safe_query(session, f"""
+        SELECT DISTINCT CONCEPT, FORM_TYPE, FILED_DATE AS FILING_DATE,
+               FISCAL_YEAR, FISCAL_PERIOD, VALUE,
+               DATA_QUALITY_SCORE
+        FROM RAW.RAW_SEC_FILINGS
+        WHERE TICKER='{ticker}' ORDER BY FILED_DATE DESC
+        LIMIT 50
+    """)
+    if df is not None and not df.empty:
+        filing_source = "filings"
 
 # ── Display filing inventory ───────────────────────────────────
 if df is None or df.empty:

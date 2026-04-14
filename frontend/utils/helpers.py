@@ -1,7 +1,13 @@
 """Shared helpers for FinSage frontend pages — dark enterprise theme."""
 
+import html as _html
 import re
 import streamlit as st
+
+
+def esc(text) -> str:
+    """HTML-escape user/API/exception content before injecting into unsafe_allow_html."""
+    return _html.escape(str(text))
 
 
 def sanitize_ticker(ticker: str) -> str:

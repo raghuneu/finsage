@@ -4,9 +4,9 @@ import sys
 import streamlit as st
 from pathlib import Path
 
-from utils.connections import get_snowflake, get_kb, get_ticker, load_tickers
+from utils.connections import get_snowflake, get_kb, render_sidebar
 from utils.styles import inject_css
-from utils.helpers import page_header, section_header, sanitize_ticker
+from utils.helpers import page_header, section_header, sanitize_ticker, esc
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -14,9 +14,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "sec_filings"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 session = get_snowflake()
 kb = get_kb()
-ticker = sanitize_ticker(get_ticker())
 
 page_header(f"Ask FinSage -- {ticker}", "Dual-source Q&A: Snowflake Cortex or Bedrock Knowledge Base")
 
@@ -103,7 +103,7 @@ for msg in st.session_state["ask_messages"]:
                 for c in msg["citations"]:
                     src = c.get("source", "")
                     name = src.split("/")[-1] if src else "Unknown"
-                    st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{name}</strong></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{esc(name)}</strong></div>', unsafe_allow_html=True)
 
 # Chat input
 if q := st.chat_input(f"Ask about {ticker}..."):
@@ -147,7 +147,7 @@ if q := st.chat_input(f"Ask about {ticker}..."):
                             for c in citations:
                                 src = c.get("source", "")
                                 name = src.split("/")[-1] if src else "Unknown"
-                                st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{name}</strong></div>', unsafe_allow_html=True)
+                                st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{esc(name)}</strong></div>', unsafe_allow_html=True)
                     st.session_state["ask_messages"].append({
                         "role": "assistant", "content": answer,
                         "source_label": "Bedrock KB", "citations": citations,

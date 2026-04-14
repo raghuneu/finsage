@@ -25,7 +25,6 @@ from datetime import datetime
 from pathlib import Path
 
 # Path setup — works when called from project root or agents/
-# Path setup — works when called from project root or agents/
 PROJECT_ROOT = Path(__file__).parent.parent
 AGENTS_DIR = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))

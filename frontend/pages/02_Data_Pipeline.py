@@ -8,13 +8,13 @@ S3 filing inventory, and an interactive pipeline runner.
 import streamlit as st
 import plotly.graph_objects as go
 
-from utils.connections import get_snowflake, get_ticker, load_tickers
+from utils.connections import get_snowflake, load_tickers, render_sidebar
 from utils.styles import inject_css, create_plotly_template
-from utils.helpers import page_header, ds_card, require_snowflake, section_header, metric_card
+from utils.helpers import page_header, ds_card, require_snowflake, section_header, metric_card, esc
 
 inject_css()
+ticker = render_sidebar()
 session = get_snowflake()
-ticker = get_ticker()
 tickers = load_tickers()
 TPL = create_plotly_template()
 
@@ -117,7 +117,7 @@ except ImportError:
 except Exception as e:
     st.markdown(
         f'<div class="fs-card" style="border-left:3px solid #ffaa00;color:#6b7280">'
-        f'S3 unavailable: {e}</div>',
+        f'S3 unavailable: {esc(e)}</div>',
         unsafe_allow_html=True,
     )
 

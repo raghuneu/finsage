@@ -10,17 +10,17 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.connections import get_snowflake, get_ticker
+from utils.connections import get_snowflake, render_sidebar
 from utils.styles import inject_css, create_plotly_template
 from utils.helpers import (
     page_header, signal_html, fmt_money, metric_card,
     require_snowflake, safe_query, safe_collect, section_header,
-    sanitize_ticker,
+    sanitize_ticker, esc,
 )
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 session = get_snowflake()
-ticker = sanitize_ticker(get_ticker())
 
 page_header(f"Dashboard -- {ticker}", "Real-time company metrics and market signals")
 require_snowflake(session)
@@ -274,9 +274,9 @@ headlines_df = safe_query(session, f"""
 
 if headlines_df is not None and not headlines_df.empty:
     for _, row in headlines_df.iterrows():
-        title = str(row["TITLE"])[:140]
-        pub = str(row.get("PUBLISHED_AT", ""))[:10]
-        source_name = str(row.get("SOURCE_NAME", ""))
+        title = esc(str(row["TITLE"])[:140])
+        pub = esc(str(row.get("PUBLISHED_AT", ""))[:10])
+        source_name = esc(str(row.get("SOURCE_NAME", "")))
         st.markdown(
             f'<div style="padding:8px 0;border-bottom:1px solid #1f2937">'
             f'<span class="status-dot green"></span>'

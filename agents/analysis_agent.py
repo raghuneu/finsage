@@ -255,7 +255,7 @@ def _cortex_complete(session: Session, prompt: str) -> str:
     Call Snowflake Cortex COMPLETE() with the given prompt.
     Returns the generated text string.
     """
-    safe_prompt = prompt.replace("'", "\\'")
+    safe_prompt = prompt.replace("'", "''")
 
     sql = f"""
         SELECT SNOWFLAKE.CORTEX.COMPLETE(
@@ -278,7 +278,7 @@ def _cortex_summarize(session: Session, text: str) -> str:
         return ""
 
     truncated = text[:MAX_SEC_TEXT_CHARS]
-    safe_text = truncated.replace("'", "\\'")
+    safe_text = truncated.replace("'", "''")
 
     sql = f"""
         SELECT SNOWFLAKE.CORTEX.SUMMARIZE(
@@ -459,10 +459,14 @@ def fetch_sec_text(session: Session, ticker: str, chart_id: str = None) -> dict:
 
     # Fallback: original SQL approach
     logger.info("Using SQL fallback for SEC text (%s)", ticker)
+    safe_ticker = ticker.upper().strip()
+    if not safe_ticker.isalpha() or len(safe_ticker) > 10:
+        logger.warning("Invalid ticker for SEC text: %s", ticker)
+        return {"mda_text": "", "risk_text": ""}
     sql = f"""
         SELECT MDA_TEXT, RISK_FACTORS_TEXT
         FROM RAW.RAW_SEC_FILING_DOCUMENTS
-        WHERE TICKER = '{ticker.upper()}'
+        WHERE TICKER = '{safe_ticker}'
           AND EXTRACTION_STATUS = 'extracted'
           AND MDA_TEXT IS NOT NULL
         ORDER BY FILING_DATE DESC

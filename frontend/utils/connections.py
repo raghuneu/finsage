@@ -73,3 +73,64 @@ def get_multi_model():
 def get_ticker():
     """Get the currently selected ticker from session state."""
     return st.session_state.get("ticker", "AAPL")
+
+
+def render_sidebar():
+    """Render the shared sidebar with ticker selector and connection indicators.
+
+    Call this from every page to ensure the ticker dropdown is always visible.
+    Returns the currently selected ticker.
+    """
+    session = get_snowflake()
+    kb = get_kb()
+    guardrail = get_guardrail()
+    mm = get_multi_model()
+    tickers = load_tickers()
+
+    with st.sidebar:
+        # Logo
+        st.markdown(
+            '<div style="padding:8px 0 4px 0">'
+            '<span style="font-size:1.6rem;font-weight:800;color:#f9fafb">Fin</span>'
+            '<span style="font-size:1.6rem;font-weight:800;color:#00d4ff">Sage</span>'
+            '</div>'
+            '<div style="color:#6b7280;font-size:0.75rem;letter-spacing:0.05em;margin-bottom:16px">'
+            'AI-POWERED EQUITY RESEARCH</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
+
+        st.markdown(
+            '<div style="color:#4b5563;font-size:0.7rem;font-weight:600;'
+            'text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px">Active Ticker</div>',
+            unsafe_allow_html=True,
+        )
+        st.selectbox(
+            "Ticker",
+            tickers,
+            key="ticker",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("---")
+
+        # Connection indicators
+        dot_g = '<span class="status-dot green pulse"></span>'
+        dot_r = '<span class="status-dot red"></span>'
+        st.markdown(
+            '<div style="color:#4b5563;font-size:0.7rem;font-weight:600;'
+            'text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Services</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"{dot_g if session else dot_r} Snowflake", unsafe_allow_html=True)
+        st.markdown(f"{dot_g if kb else dot_r} Bedrock KB", unsafe_allow_html=True)
+        st.markdown(f"{dot_g if guardrail else dot_r} Guardrails", unsafe_allow_html=True)
+        st.markdown(f"{dot_g if mm else dot_r} Multi-Model", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown(
+            '<div style="color:#4b5563;font-size:0.7rem">v1.0 &middot; FinSage Platform</div>',
+            unsafe_allow_html=True,
+        )
+
+    return st.session_state.get("ticker", "AAPL")

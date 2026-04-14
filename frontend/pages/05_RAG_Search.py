@@ -7,13 +7,13 @@ and Raw Chunks (direct vector retrieval).
 
 import streamlit as st
 
-from utils.connections import get_kb, get_ticker
+from utils.connections import get_kb, render_sidebar
 from utils.styles import inject_css
-from utils.helpers import page_header, section_header, sanitize_ticker
+from utils.helpers import page_header, section_header, sanitize_ticker, esc
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 kb = get_kb()
-ticker = sanitize_ticker(get_ticker())
 
 page_header("RAG Search", "Semantic search over SEC filings via Bedrock Knowledge Base")
 
@@ -56,10 +56,11 @@ with t1:
                         source = c.get("source", "")
                         source_name = source.split("/")[-1] if source else "Unknown source"
                         text_snippet = c.get("text", "")[:200]
+                        snippet_html = f'<br><span style="color:#6b7280;font-size:0.8rem">{esc(text_snippet)}...</span>' if text_snippet else ""
                         st.markdown(
                             f'<div class="citation-box">'
-                            f'<strong style="color:#00d4ff">{source_name}</strong>'
-                            f'{"<br><span style=color:#6b7280;font-size:0.8rem>" + text_snippet + "...</span>" if text_snippet else ""}'
+                            f'<strong style="color:#00d4ff">{esc(source_name)}</strong>'
+                            f'{snippet_html}'
                             f'</div>',
                             unsafe_allow_html=True,
                         )
@@ -135,7 +136,7 @@ with t2:
                 analysis = r.get("analysis", "")
 
                 if tickers_found:
-                    pills = " ".join(f'<span class="pill-btn" style="cursor:default">{t}</span>' for t in tickers_found)
+                    pills = " ".join(f'<span class="pill-btn" style="cursor:default">{esc(t)}</span>' for t in tickers_found)
                     st.markdown(f'<div style="margin-bottom:12px">Tickers found: {pills}</div>', unsafe_allow_html=True)
 
                 if analysis:
@@ -188,7 +189,7 @@ with t3:
                             header += f" -- {chunk_ticker}"
                         if section:
                             header += f" / {section}"
-                        header += f" (score: {score:.3f})"
+                        header += f" (score: {score:.3f})" if isinstance(score, (int, float)) else f" (score: {score})"
 
                         with st.expander(header):
                             st.markdown(

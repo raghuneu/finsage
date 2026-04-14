@@ -1,11 +1,12 @@
 """FinSage Guardrails Demo -- Test Bedrock Guardrails for content safety."""
 
 import streamlit as st
-from utils.connections import get_guardrail
+from utils.connections import get_guardrail, render_sidebar
 from utils.styles import inject_css
-from utils.helpers import page_header, section_header
+from utils.helpers import page_header, section_header, esc
 
 inject_css()
+render_sidebar()
 guardrail = get_guardrail()
 
 page_header("Guardrails Demo", "Test Bedrock Guardrails -- content safety, PII redaction, and grounding checks")
@@ -144,9 +145,9 @@ if run_check and text:
                 if isinstance(d, dict):
                     dtype = d.get("type", "Assessment")
                     msg = d.get("message", str(d))
-                    st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{dtype}:</strong> {msg}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{esc(dtype)}:</strong> {esc(msg)}</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="citation-box">{d}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="citation-box">{esc(d)}</div>', unsafe_allow_html=True)
 
     # Output text
     section_header("Output Text")

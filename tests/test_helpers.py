@@ -35,23 +35,23 @@ class TestSignalBadge:
 
     def test_bullish_signal(self):
         html = signal_badge("BULLISH")
-        assert "06d6a0" in html
+        assert "00ff88" in html
         assert "BULLISH" in html
 
     def test_bearish_signal(self):
         html = signal_badge("BEARISH")
-        assert "ef476f" in html
+        assert "ff3366" in html
         assert "BEARISH" in html
 
     def test_neutral_signal(self):
         html = signal_badge("MIXED")
-        assert "94a3b8" in html
+        assert "6b7280" in html
         assert "MIXED" in html
 
     def test_growth_signal(self):
         html = signal_badge("STRONG_GROWTH")
-        assert "06d6a0" in html
+        assert "00ff88" in html
 
     def test_declining_signal(self):
         html = signal_badge("DECLINING")
-        assert "ef476f" in html
+        assert "ff3366" in html

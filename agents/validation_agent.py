@@ -154,11 +154,11 @@ def run_vlm_check(session, chart: dict) -> dict:
         }
 
     except Exception as e:
-        logger.warning("VLM check failed for %s: %s — defaulting to PASS", chart_id, e)
+        logger.warning("VLM check failed for %s: %s — defaulting to FAIL", chart_id, e)
         return {
-            "passed": True,
-            "score": 7.0,
-            "feedback": f"VLM check skipped: {e}",
+            "passed": False,
+            "score": 0.0,
+            "feedback": f"VLM check failed: {e}",
             "check": "vlm_review",
         }
 

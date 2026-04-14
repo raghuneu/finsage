@@ -6,7 +6,7 @@ import time
 import streamlit as st
 from pathlib import Path
 
-from utils.connections import get_snowflake, get_ticker, load_tickers
+from utils.connections import get_snowflake, load_tickers, render_sidebar
 from utils.styles import inject_css
 from utils.helpers import page_header, require_snowflake, section_header, metric_card, pipeline_tracker, sanitize_ticker
 
@@ -17,8 +17,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "agents"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 session = get_snowflake()
-ticker = sanitize_ticker(get_ticker())
 
 page_header("Research Report", "Generate comprehensive financial research reports")
 require_snowflake(session)

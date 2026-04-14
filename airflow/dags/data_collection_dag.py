@@ -12,7 +12,9 @@ Pipeline:
 import sys
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
+import yaml
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
@@ -21,7 +23,19 @@ from airflow.operators.bash import BashOperator
 sys.path.insert(0, '/opt/airflow')
 
 DBT_DIR = '/opt/airflow/dbt_finsage'
-TICKERS = ['AAPL', 'MSFT', 'GOOGL']
+
+
+def _load_tickers():
+    """Load ticker list from config/tickers.yaml, falling back to defaults."""
+    config_path = Path('/opt/airflow/config/tickers.yaml')
+    if config_path.exists():
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        return config.get('tickers', ['AAPL', 'MSFT', 'GOOGL'])
+    return ['AAPL', 'MSFT', 'GOOGL']
+
+
+TICKERS = _load_tickers()
 
 # Default arguments for all tasks
 default_args = {

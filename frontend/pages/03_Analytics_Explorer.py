@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from utils.connections import get_snowflake, get_ticker
+from utils.connections import get_snowflake, render_sidebar
 from utils.styles import inject_css, create_plotly_template
 from utils.helpers import (
     page_header, signal_html, require_snowflake, safe_query, section_header, fmt_money,
@@ -18,8 +18,8 @@ from utils.helpers import (
 )
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 session = get_snowflake()
-ticker = sanitize_ticker(get_ticker())
 
 TPL = create_plotly_template()
 
@@ -45,10 +45,10 @@ with t1:
             st.markdown(f"**Trend:** {signal_html(latest['TREND_SIGNAL'])}", unsafe_allow_html=True)
         with c2:
             close_val = latest['CLOSE']
-            st.markdown(f"**Latest Close:** ${close_val:.2f}" if close_val else "**Latest Close:** N/A")
+            st.markdown(f"**Latest Close:** ${close_val:.2f}" if close_val is not None else "**Latest Close:** N/A")
         with c3:
             vol = latest.get('VOLATILITY_30D_PCT')
-            st.markdown(f"**30d Volatility:** {vol:.2f}%" if vol else "**30d Volatility:** N/A")
+            st.markdown(f"**30d Volatility:** {vol:.2f}%" if vol is not None else "**30d Volatility:** N/A")
 
         st.markdown("")
 
@@ -118,7 +118,7 @@ with t2:
             st.markdown(f"**Revenue:** {fmt_money(latest.get('REVENUE'))}")
         with c3:
             eps = latest.get("EPS")
-            st.markdown(f"**EPS:** ${eps:.2f}" if eps else "**EPS:** N/A")
+            st.markdown(f"**EPS:** ${eps:.2f}" if eps is not None else "**EPS:** N/A")
 
         st.markdown("")
         df_sorted = df.sort_values("FISCAL_QUARTER")
@@ -236,7 +236,7 @@ with t4:
             st.markdown(f"**Revenue:** {fmt_money(latest.get('TOTAL_REVENUE'))}")
         with c3:
             margin = latest.get("NET_MARGIN_PCT")
-            st.markdown(f"**Net Margin:** {margin:.1f}%" if margin else "**Net Margin:** N/A")
+            st.markdown(f"**Net Margin:** {margin:.1f}%" if margin is not None else "**Net Margin:** N/A")
 
         st.markdown("")
         df_sorted = df.sort_values(["FISCAL_YEAR", "FISCAL_PERIOD"])

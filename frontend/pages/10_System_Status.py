@@ -6,9 +6,9 @@ import streamlit as st
 import plotly.graph_objects as go
 from pathlib import Path
 
-from utils.connections import get_snowflake, get_kb, get_guardrail, get_multi_model, load_tickers
+from utils.connections import get_snowflake, get_kb, get_guardrail, get_multi_model, load_tickers, render_sidebar
 from utils.styles import inject_css, create_plotly_template
-from utils.helpers import page_header, section_header, health_card, metric_card
+from utils.helpers import page_header, section_header, health_card, metric_card, esc
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -16,6 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "sec_filings"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 inject_css()
+render_sidebar()
 session = get_snowflake()
 kb = get_kb()
 guardrail = get_guardrail()
@@ -95,7 +96,7 @@ with c2:
 with c3:
     if kb:
         kb_id = os.getenv("BEDROCK_KB_ID", "N/A")
-        health_card("Bedrock KB", "healthy", f"KB ID: {kb_id[:20]}...")
+        health_card("Bedrock KB", "healthy", f"KB ID: {kb_id[:20]}{'...' if len(kb_id) > 20 else ''}")
     else:
         kb_id = os.getenv("BEDROCK_KB_ID", "")
         if kb_id:
@@ -200,7 +201,7 @@ if session:
             session.sql("SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', 'Reply with only OK') AS result").collect()
             st.markdown('<span class="status-dot green pulse"></span> **mistral-large** -- responding', unsafe_allow_html=True)
         except Exception as e:
-            st.markdown(f'<span class="status-dot red"></span> **mistral-large** -- {e}', unsafe_allow_html=True)
+            st.markdown(f'<span class="status-dot red"></span> **mistral-large** -- {esc(e)}', unsafe_allow_html=True)
 
     with c_vlm:
         st.markdown('<span class="status-dot amber"></span> **pixtral-large** -- not tested (needs image)', unsafe_allow_html=True)
@@ -210,7 +211,7 @@ if session:
             session.sql("SELECT SNOWFLAKE.CORTEX.SUMMARIZE('Test summary.') AS result").collect()
             st.markdown('<span class="status-dot green pulse"></span> **SUMMARIZE** -- available', unsafe_allow_html=True)
         except Exception as e:
-            st.markdown(f'<span class="status-dot red"></span> **SUMMARIZE** -- {e}', unsafe_allow_html=True)
+            st.markdown(f'<span class="status-dot red"></span> **SUMMARIZE** -- {esc(e)}', unsafe_allow_html=True)
 else:
     st.markdown('<div style="color:#6b7280;font-size:0.85rem">Snowflake not connected. Cannot test Cortex.</div>', unsafe_allow_html=True)
 

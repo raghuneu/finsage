@@ -5,9 +5,9 @@ import streamlit as st
 import plotly.graph_objects as go
 from pathlib import Path
 
-from utils.connections import get_multi_model, get_ticker, load_tickers
+from utils.connections import get_multi_model, render_sidebar
 from utils.styles import inject_css, create_plotly_template
-from utils.helpers import page_header, section_header, metric_card, sanitize_ticker
+from utils.helpers import page_header, section_header, metric_card, sanitize_ticker, esc
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -15,8 +15,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "sec_filings"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 inject_css()
+ticker = sanitize_ticker(render_sidebar())
 mm = get_multi_model()
-ticker = sanitize_ticker(get_ticker())
 TPL = create_plotly_template()
 
 page_header("Multi-Model Analysis", "Compare responses across Bedrock LLMs and synthesize consensus")
@@ -96,14 +96,14 @@ if st.button("Run Comparison", type="primary") and q:
             if success:
                 st.markdown(resp.get("output", "")[:800])
             else:
-                st.markdown(f'<div style="color:#ff3366;font-size:0.85rem">{resp.get("error", "Unknown error")[:200]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="color:#ff3366;font-size:0.85rem">{esc(resp.get("error", "Unknown error")[:200])}</div>', unsafe_allow_html=True)
 
     # ── Consensus ───────────────────────────────────────────
     consensus_text = r.get("consensus")
     if consensus_text:
         st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
         section_header("Consensus Analysis")
-        st.markdown(f'<div class="consensus-box">{consensus_text}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="consensus-box">{esc(consensus_text)}</div>', unsafe_allow_html=True)
 
     # ── Performance Summary ─────────────────────────────────
     st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
