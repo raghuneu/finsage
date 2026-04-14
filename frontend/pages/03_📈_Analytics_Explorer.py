@@ -14,7 +14,7 @@ from utils.connections import get_snowflake, render_sidebar
 from utils.styles import inject_css, create_plotly_template
 from utils.helpers import (
     page_header, signal_html, require_snowflake, safe_query, section_header, fmt_money,
-    sanitize_ticker,
+    sanitize_ticker, cached_query, render_badge,
 )
 
 inject_css()
@@ -32,7 +32,7 @@ t1, t2, t3, t4 = st.tabs(["Stock Metrics", "Fundamentals", "Sentiment", "SEC Fin
 with t1:
     section_header("Stock Metrics", "Price history, moving averages, and volatility")
 
-    df = safe_query(session, f"""
+    df = cached_query(f"""
         SELECT DATE, OPEN, HIGH, LOW, CLOSE, SMA_7D, SMA_30D, SMA_90D, VOLUME,
                DAILY_RETURN_PCT, VOLATILITY_30D_PCT, TREND_SIGNAL
         FROM ANALYTICS.FCT_STOCK_METRICS
@@ -42,7 +42,7 @@ with t1:
         latest = df.iloc[0]
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(f"**Trend:** {signal_html(latest['TREND_SIGNAL'])}", unsafe_allow_html=True)
+            st.markdown(f"**Trend:** {render_badge(latest['TREND_SIGNAL'], latest['TREND_SIGNAL'])}", unsafe_allow_html=True)
         with c2:
             close_val = latest['CLOSE']
             st.markdown(f"**Latest Close:** ${close_val:.2f}" if close_val is not None else "**Latest Close:** N/A")
@@ -102,10 +102,12 @@ with t1:
 with t2:
     section_header("Fundamentals Growth", "Quarterly financials and growth rates")
 
-    df = safe_query(session, f"""
+    df = cached_query(f"""
         SELECT FISCAL_QUARTER, REVENUE, NET_INCOME, EPS,
-               REVENUE_GROWTH_QOQ_PCT, REVENUE_GROWTH_YOY_PCT,
-               NET_MARGIN_PCT, FUNDAMENTAL_SIGNAL
+               REVENUE_GROWTH_QOQ AS REVENUE_GROWTH_QOQ_PCT,
+               REVENUE_GROWTH_YOY AS REVENUE_GROWTH_YOY_PCT,
+               NET_MARGIN AS NET_MARGIN_PCT,
+               FUNDAMENTAL_SIGNAL
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER='{ticker}' ORDER BY FISCAL_QUARTER DESC LIMIT 12
     """)
@@ -113,7 +115,7 @@ with t2:
         latest = df.iloc[0]
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(f"**Signal:** {signal_html(latest['FUNDAMENTAL_SIGNAL'])}", unsafe_allow_html=True)
+            st.markdown(f"**Signal:** {render_badge(latest['FUNDAMENTAL_SIGNAL'], latest['FUNDAMENTAL_SIGNAL'])}", unsafe_allow_html=True)
         with c2:
             st.markdown(f"**Revenue:** {fmt_money(latest.get('REVENUE'))}")
         with c3:
@@ -159,9 +161,11 @@ with t2:
 with t3:
     section_header("News Sentiment", "Daily sentiment aggregation from news articles")
 
-    df = safe_query(session, f"""
-        SELECT NEWS_DATE, TOTAL_ARTICLES, POSITIVE_COUNT, NEGATIVE_COUNT,
-               SENTIMENT_SCORE, SENTIMENT_SCORE_7D_AVG,
+    df = cached_query(f"""
+        SELECT NEWS_DATE, ARTICLE_COUNT AS TOTAL_ARTICLES,
+               POSITIVE_COUNT, NEGATIVE_COUNT,
+               AVG_SENTIMENT_SCORE AS SENTIMENT_SCORE,
+               ROLLING_SENTIMENT_7D AS SENTIMENT_SCORE_7D_AVG,
                SENTIMENT_LABEL, SENTIMENT_TREND
         FROM ANALYTICS.FCT_NEWS_SENTIMENT_AGG
         WHERE TICKER='{ticker}' ORDER BY NEWS_DATE DESC LIMIT 30
@@ -170,7 +174,7 @@ with t3:
         latest = df.iloc[0]
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(f"**Sentiment:** {signal_html(latest['SENTIMENT_LABEL'])}", unsafe_allow_html=True)
+            st.markdown(f"**Sentiment:** {render_badge(latest['SENTIMENT_LABEL'], latest['SENTIMENT_LABEL'])}", unsafe_allow_html=True)
         with c2:
             st.markdown(f"**Trend:** {latest.get('SENTIMENT_TREND', 'N/A')}")
         with c3:
@@ -220,10 +224,15 @@ with t3:
 with t4:
     section_header("SEC Financial Summary", "Financials extracted from SEC filings (XBRL)")
 
-    df = safe_query(session, f"""
-        SELECT FISCAL_YEAR, FISCAL_PERIOD, TOTAL_REVENUE, NET_INCOME,
-               OPERATING_MARGIN_PCT, NET_MARGIN_PCT, RETURN_ON_EQUITY_PCT,
-               DEBT_TO_EQUITY_RATIO, REVENUE_GROWTH_YOY_PCT, FINANCIAL_HEALTH
+    df = cached_query(f"""
+        SELECT FISCAL_YEAR, FISCAL_PERIOD,
+               REVENUE AS TOTAL_REVENUE, NET_INCOME,
+               OPERATING_MARGIN AS OPERATING_MARGIN_PCT,
+               NET_MARGIN AS NET_MARGIN_PCT,
+               ROE AS RETURN_ON_EQUITY_PCT,
+               DEBT_TO_EQUITY AS DEBT_TO_EQUITY_RATIO,
+               REVENUE_GROWTH_YOY AS REVENUE_GROWTH_YOY_PCT,
+               FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
         WHERE TICKER='{ticker}' ORDER BY FISCAL_YEAR DESC LIMIT 10
     """)
@@ -231,7 +240,7 @@ with t4:
         latest = df.iloc[0]
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(f"**Health:** {signal_html(latest['FINANCIAL_HEALTH'])}", unsafe_allow_html=True)
+            st.markdown(f"**Health:** {render_badge(latest['FINANCIAL_HEALTH'], latest['FINANCIAL_HEALTH'])}", unsafe_allow_html=True)
         with c2:
             st.markdown(f"**Revenue:** {fmt_money(latest.get('TOTAL_REVENUE'))}")
         with c3:

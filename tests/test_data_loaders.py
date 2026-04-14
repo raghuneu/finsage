@@ -177,4 +177,4 @@ class TestNewsLoader:
 
     def test_get_merge_keys(self, mock_sf_client):
         loader = NewsLoader(mock_sf_client)
-        assert loader.get_merge_keys() == ["ARTICLE_ID"]
+        assert loader.get_merge_keys() == ["TICKER", "URL"]

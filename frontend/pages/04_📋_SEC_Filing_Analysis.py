@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 
 from utils.connections import get_snowflake, render_sidebar
 from utils.styles import inject_css, create_plotly_template
-from utils.helpers import page_header, require_snowflake, section_header, safe_query, sanitize_ticker
+from utils.helpers import page_header, require_snowflake, section_header, safe_query, sanitize_ticker, escape_latex, cached_query
 
 inject_css()
 ticker = sanitize_ticker(render_sidebar())
@@ -35,7 +35,7 @@ except Exception:
 filing_source = None
 df = None
 
-df = safe_query(session, f"""
+df = cached_query(f"""
     SELECT FILING_ID, FORM_TYPE, FILING_DATE, PERIOD_OF_REPORT,
            COMPANY_NAME, MDA_WORD_COUNT, RISK_WORD_COUNT,
            EXTRACTION_STATUS, DATA_QUALITY_SCORE
@@ -46,7 +46,7 @@ if df is not None and not df.empty:
     filing_source = "documents"
 
 if df is None or df.empty:
-    df = safe_query(session, f"""
+    df = cached_query(f"""
         SELECT DISTINCT CONCEPT, FORM_TYPE, FILED_DATE AS FILING_DATE,
                FISCAL_YEAR, FISCAL_PERIOD, VALUE,
                DATA_QUALITY_SCORE
@@ -168,7 +168,7 @@ if st.button("Run Analysis", type="primary"):
                 if result:
                     st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
                     section_header(f"{mode} Results")
-                    st.markdown(result)
+                    st.markdown(escape_latex(result))
                 else:
                     st.markdown(
                         '<div style="color:#ffaa00;font-size:0.85rem">'

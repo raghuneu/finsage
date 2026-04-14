@@ -32,9 +32,9 @@ sys.path.insert(0, str(AGENTS_DIR))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from snowflake_connection import get_session
-from chart_agent import generate_charts
-from validation_agent import validate_all_charts
-from analysis_agent import run_analysis
+from chart_agent import generate_charts, regenerate_single_chart
+from validation_agent import validate_all_charts, validate_chart
+from analysis_agent import run_analysis, generate_company_overview, generate_peer_comparison
 from report_agent import generate_report
 
 logging.basicConfig(
@@ -58,6 +58,14 @@ COMPANY_NAMES = {
     "BAC":   "Bank of America Corp.",
     "GS":    "Goldman Sachs Group Inc.",
 }
+
+
+def _first_failure_reason(chart: dict) -> str:
+    """Extract the first failed validation note for logging."""
+    for note in chart.get("validation_notes", []):
+        if not note.get("passed", True):
+            return note.get("message") or note.get("feedback") or note.get("check", "unknown")
+    return "unknown"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -95,6 +103,34 @@ def stage_analysis(session, charts: list, ticker: str) -> dict:
     analysis = run_analysis(session, charts, ticker)
     logger.info("Stage 3 complete: %d chart analyses + SEC summaries",
                 len(analysis.get("chart_analyses", [])))
+
+    # Generate Company Overview and Peer Comparison
+    logger.info("━" * 50)
+    logger.info("STAGE 3b: Company Overview & Peer Comparison")
+    logger.info("━" * 50)
+    try:
+        analysis["company_overview"] = generate_company_overview(session, ticker)
+        logger.info("Company overview generated for %s", ticker)
+    except Exception as e:
+        logger.warning("Company overview failed for %s: %s", ticker, e)
+        analysis["company_overview"] = {
+            "company_description": f"Company overview not available for {ticker}.",
+            "key_facts": {},
+            "business_segments": "",
+        }
+
+    try:
+        analysis["peer_comparison"] = generate_peer_comparison(session, ticker)
+        logger.info("Peer comparison generated for %s (%d peers)",
+                     ticker, len(analysis["peer_comparison"].get("peers", [])) - 1)
+    except Exception as e:
+        logger.warning("Peer comparison failed for %s: %s", ticker, e)
+        analysis["peer_comparison"] = {
+            "ticker": ticker,
+            "peers": [],
+            "comparison_summary": f"Peer comparison not available for {ticker}.",
+        }
+
     return analysis
 
 
@@ -258,17 +294,46 @@ def generate_report_pipeline(
         if not charts:
             raise RuntimeError("No charts generated — cannot proceed")
 
-        # ── Stage 2: Validation ──────────────────────────────
+        # ── Stage 2: Validation with retry ───────────────────
         validated_charts = stage_validation(session, charts)
 
-        # Filter failed charts — only pass validated ones to analysis/report
-        passing_charts = [c for c in validated_charts if c.get("validated")]
-        failed = [c for c in validated_charts if not c.get("validated")]
+        MAX_ATTEMPTS = 3
+        skipped = []
+        for i, chart in enumerate(validated_charts):
+            if chart.get("validated"):
+                continue
+            chart_id = chart.get("chart_id", "unknown")
+            reason = _first_failure_reason(chart)
+            attempt = 1  # initial generation already counts
+            while not chart.get("validated") and attempt < MAX_ATTEMPTS:
+                attempt += 1
+                logger.info(
+                    "Retrying chart %s, attempt %d/%d, reason: %s",
+                    chart_id, attempt, MAX_ATTEMPTS, reason
+                )
+                try:
+                    new_chart = regenerate_single_chart(
+                        session, ticker, chart_id, run_dir, debug=debug
+                    )
+                    new_chart = validate_chart(session, new_chart)
+                    validated_charts[i] = new_chart
+                    chart = new_chart
+                    reason = _first_failure_reason(chart)
+                except Exception as e:
+                    logger.warning("Retry exception for %s: %s", chart_id, e)
+                    reason = f"retry exception: {e}"
+            if not chart.get("validated"):
+                chart["skipped_reason"] = reason
+                skipped.append((chart_id, reason))
+                logger.warning("Chart %s skipped after %d attempts: %s",
+                               chart_id, MAX_ATTEMPTS, reason)
 
-        if failed:
-            logger.warning(
-                "%d chart(s) failed validation and will be excluded: %s",
-                len(failed), [c["chart_id"] for c in failed]
+        passing_charts = [c for c in validated_charts if c.get("validated")]
+
+        if len(skipped) > 2:
+            details = "; ".join(f"{cid}: {r}" for cid, r in skipped)
+            raise RuntimeError(
+                f"Pipeline aborted — {len(skipped)} charts failed after retries: {details}"
             )
 
         if not passing_charts:

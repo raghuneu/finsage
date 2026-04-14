@@ -74,14 +74,11 @@ for layer in ["ANALYTICS", "STAGING", "RAW"]:
         textfont=dict(color="#e5e7eb"),
     ))
 
+fig.update_layout(**TPL, height=max(350, len(table_names) * 28), barmode="group", showlegend=True,
+    xaxis_title="Row Count")
 fig.update_layout(
-    **TPL,
-    height=max(350, len(table_names) * 28),
-    barmode="group",
-    showlegend=True,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
                 bgcolor="rgba(0,0,0,0)", font=dict(color="#e5e7eb"), bordercolor="rgba(0,0,0,0)"),
-    xaxis_title="Row Count",
     yaxis=dict(autorange="reversed"),
 )
 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})

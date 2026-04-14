@@ -77,7 +77,16 @@ for row_start in range(0, len(keys), 3):
             _, desc, expected = EXAMPLES[key]
             icon_map = {"block": "🚫", "redact": "🔒", "pass": "✅", "custom": "✏️"}
             border_map = {"block": "#ff3366", "redact": "#ffaa00", "pass": "#00ff88", "custom": "#00d4ff"}
+            is_selected = st.session_state.get("guardrail_scenario") == key
+            border_color = border_map.get(expected, "#1f2937")
             with col:
+                if is_selected:
+                    st.markdown(
+                        f'<div style="border:2px solid {border_color};border-radius:8px;padding:2px;margin-bottom:4px">'
+                        f'<div style="text-align:center;color:{border_color};font-size:0.7rem;font-weight:600">'
+                        f'SELECTED</div></div>',
+                        unsafe_allow_html=True,
+                    )
                 if st.button(
                     f"{icon_map.get(expected, '')} {key}",
                     key=f"scenario_{idx}",

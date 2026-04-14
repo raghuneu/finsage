@@ -76,11 +76,14 @@ c1, c2, c3 = st.columns(3)
 with c1:
     if session:
         try:
+            import time as _t
+            _t0 = _t.time()
             info = session.sql(
                 "SELECT CURRENT_USER() u, CURRENT_ROLE() r, "
                 "CURRENT_WAREHOUSE() w, CURRENT_DATABASE() d"
             ).collect()[0]
-            detail = f"User: {info['U']} | Role: {info['R']} | DB: {info['D']}"
+            _ms = int((_t.time() - _t0) * 1000)
+            detail = f"User: {info['U']} | Role: {info['R']} | DB: {info['D']} | {_ms}ms"
         except Exception:
             detail = "Connected"
         health_card("Snowflake", "healthy", detail)
@@ -108,7 +111,7 @@ c4, c5, c6 = st.columns(3)
 
 with c4:
     if guardrail:
-        health_card("Guardrails", "healthy", f"ID: {guardrail.guardrail_id}")
+        health_card("Guardrails", "healthy", f"ID: {esc(str(guardrail.guardrail_id))}")
     else:
         health_card("Guardrails", "down", "Set BEDROCK_GUARDRAIL_ID in .env")
 
@@ -146,7 +149,7 @@ if session:
     values = [0]
     colors = ["#0a0e17"]
 
-    schema_colors = {"RAW": "#00d4ff", "STAGING": "#ffaa00", "ANALYTICS": "#00ff88"}
+    schema_colors = {"RAW": "#0c4a6e", "STAGING": "#3a2e05", "ANALYTICS": "#064e3b"}
 
     for schema, tables in all_tables.items():
         labels.append(schema)
@@ -171,7 +174,7 @@ if session:
         marker=dict(colors=colors, line=dict(width=1, color="#0a0e17")),
         textfont=dict(color="#f9fafb"),
         hovertemplate="<b>%{label}</b><br>Rows: %{value:,}<extra></extra>",
-        branchvalues="total",
+        branchvalues="remainder",
     ))
     fig.update_layout(
         paper_bgcolor="#0a0e17",
@@ -198,8 +201,11 @@ if session:
     c_llm, c_vlm, c_sum = st.columns(3)
     with c_llm:
         try:
+            import time as _t
+            _t0 = _t.time()
             session.sql("SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', 'Reply with only OK') AS result").collect()
-            st.markdown('<span class="status-dot green pulse"></span> **mistral-large** -- responding', unsafe_allow_html=True)
+            _ms = int((_t.time() - _t0) * 1000)
+            st.markdown(f'<span class="status-dot green pulse"></span> **mistral-large** -- responding ({_ms}ms)', unsafe_allow_html=True)
         except Exception as e:
             st.markdown(f'<span class="status-dot red"></span> **mistral-large** -- {esc(e)}', unsafe_allow_html=True)
 
@@ -208,8 +214,10 @@ if session:
 
     with c_sum:
         try:
+            _t0 = _t.time()
             session.sql("SELECT SNOWFLAKE.CORTEX.SUMMARIZE('Test summary.') AS result").collect()
-            st.markdown('<span class="status-dot green pulse"></span> **SUMMARIZE** -- available', unsafe_allow_html=True)
+            _ms = int((_t.time() - _t0) * 1000)
+            st.markdown(f'<span class="status-dot green pulse"></span> **SUMMARIZE** -- available ({_ms}ms)', unsafe_allow_html=True)
         except Exception as e:
             st.markdown(f'<span class="status-dot red"></span> **SUMMARIZE** -- {esc(e)}', unsafe_allow_html=True)
 else:

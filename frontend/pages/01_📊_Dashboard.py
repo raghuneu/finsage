@@ -15,8 +15,9 @@ from utils.styles import inject_css, create_plotly_template
 from utils.helpers import (
     page_header, signal_html, fmt_money, metric_card,
     require_snowflake, safe_query, safe_collect, section_header,
-    sanitize_ticker, esc,
+    sanitize_ticker, esc, cached_kpi_query, cached_query, render_badge,
 )
+from datetime import datetime
 
 inject_css()
 ticker = sanitize_ticker(render_sidebar())
@@ -24,102 +25,97 @@ session = get_snowflake()
 
 page_header(f"Dashboard -- {ticker}", "Real-time company metrics and market signals")
 require_snowflake(session)
+st.markdown(
+    f'<div style="color:#6b7280;font-size:0.8rem;margin-top:-8px;margin-bottom:12px">'
+    f'Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>',
+    unsafe_allow_html=True,
+)
 
 TPL = create_plotly_template()
 
-# ── Fetch data from analytics layer ────────────────────────────
-profile = {}
-try:
-    rows = session.sql(f"""
-        SELECT MARKET_CAP, MARKET_CAP_CATEGORY, PE_RATIO, PROFIT_MARGIN,
-               DEBT_TO_EQUITY, TOTAL_TRADING_DAYS, TOTAL_NEWS_ARTICLES,
-               DATA_SOURCES_AVAILABLE
+
+@st.cache_data(ttl=60)
+def _fetch_profile(ticker: str) -> dict:
+    df = cached_kpi_query(f"""
+        SELECT MARKET_CAP, PE_RATIO, PROFIT_MARGIN
         FROM ANALYTICS.DIM_COMPANY
         WHERE TICKER = '{ticker}'
-    """).collect()
-    if rows:
-        r = rows[0]
-        profile = {
-            "market_cap": r["MARKET_CAP"],
-            "pe_ratio": r["PE_RATIO"],
-            "profit_margin": r["PROFIT_MARGIN"],
-        }
-except Exception:
-    pass
+    """)
+    if df is None or df.empty:
+        return {}
+    r = df.iloc[0]
+    return {"market_cap": r["MARKET_CAP"], "pe_ratio": r["PE_RATIO"], "profit_margin": r["PROFIT_MARGIN"]}
 
-stock = {}
-try:
-    rows = session.sql(f"""
-        SELECT DATE, CLOSE, OPEN, HIGH, LOW, VOLUME,
-               DAILY_RETURN_PCT, SMA_7D, SMA_30D, SMA_90D,
-               VOLATILITY_30D_PCT, TREND_SIGNAL
+
+@st.cache_data(ttl=60)
+def _fetch_stock(ticker: str) -> dict:
+    df = cached_kpi_query(f"""
+        SELECT CLOSE, DAILY_RETURN_PCT, TREND_SIGNAL
         FROM ANALYTICS.FCT_STOCK_METRICS
         WHERE TICKER = '{ticker}'
-        ORDER BY DATE DESC
-        LIMIT 1
-    """).collect()
-    if rows:
-        r = rows[0]
-        stock = {
-            "close": r["CLOSE"],
-            "daily_return_pct": r["DAILY_RETURN_PCT"],
-            "trend_signal": r["TREND_SIGNAL"],
-        }
-except Exception:
-    pass
+        ORDER BY DATE DESC LIMIT 1
+    """)
+    if df is None or df.empty:
+        return {}
+    r = df.iloc[0]
+    return {"close": r["CLOSE"], "daily_return_pct": r["DAILY_RETURN_PCT"], "trend_signal": r["TREND_SIGNAL"]}
 
-fundamentals = {}
-try:
-    rows = session.sql(f"""
-        SELECT REVENUE, REVENUE_GROWTH_YOY_PCT, NET_INCOME,
-               EPS, FUNDAMENTAL_SIGNAL
+
+@st.cache_data(ttl=60)
+def _fetch_fundamentals(ticker: str) -> dict:
+    df = cached_kpi_query(f"""
+        SELECT REVENUE, REVENUE_GROWTH_YOY AS REVENUE_GROWTH_YOY_PCT,
+               NET_INCOME, EPS, FUNDAMENTAL_SIGNAL
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER = '{ticker}'
-        ORDER BY FISCAL_QUARTER DESC
-        LIMIT 1
-    """).collect()
-    if rows:
-        r = rows[0]
-        fundamentals = {
-            "revenue": r["REVENUE"],
-            "revenue_growth_yoy_pct": r["REVENUE_GROWTH_YOY_PCT"],
-            "fundamental_signal": r["FUNDAMENTAL_SIGNAL"],
-        }
-except Exception:
-    pass
+        ORDER BY FISCAL_QUARTER DESC LIMIT 1
+    """)
+    if df is None or df.empty:
+        return {}
+    r = df.iloc[0]
+    return {
+        "revenue": r["REVENUE"],
+        "revenue_growth_yoy_pct": r["REVENUE_GROWTH_YOY_PCT"],
+        "fundamental_signal": r["FUNDAMENTAL_SIGNAL"],
+    }
 
-sentiment = {}
-try:
-    rows = session.sql(f"""
-        SELECT SENTIMENT_SCORE, SENTIMENT_LABEL, SENTIMENT_TREND
+
+@st.cache_data(ttl=60)
+def _fetch_sentiment(ticker: str) -> dict:
+    df = cached_kpi_query(f"""
+        SELECT AVG_SENTIMENT_SCORE AS SENTIMENT_SCORE, SENTIMENT_LABEL, SENTIMENT_TREND
         FROM ANALYTICS.FCT_NEWS_SENTIMENT_AGG
         WHERE TICKER = '{ticker}'
-        ORDER BY NEWS_DATE DESC
-        LIMIT 1
-    """).collect()
-    if rows:
-        r = rows[0]
-        sentiment = {
-            "sentiment_score": r["SENTIMENT_SCORE"],
-            "sentiment_label": r["SENTIMENT_LABEL"],
-            "sentiment_trend": r["SENTIMENT_TREND"],
-        }
-except Exception:
-    pass
+        ORDER BY NEWS_DATE DESC LIMIT 1
+    """)
+    if df is None or df.empty:
+        return {}
+    r = df.iloc[0]
+    return {
+        "sentiment_score": r["SENTIMENT_SCORE"],
+        "sentiment_label": r["SENTIMENT_LABEL"],
+        "sentiment_trend": r["SENTIMENT_TREND"],
+    }
 
-sec_fin = {}
-try:
-    rows = session.sql(f"""
+
+@st.cache_data(ttl=60)
+def _fetch_sec_fin(ticker: str) -> dict:
+    df = cached_kpi_query(f"""
         SELECT FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
         WHERE TICKER = '{ticker}'
-        ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC
-        LIMIT 1
-    """).collect()
-    if rows:
-        sec_fin = {"financial_health": rows[0]["FINANCIAL_HEALTH"]}
-except Exception:
-    pass
+        ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC LIMIT 1
+    """)
+    if df is None or df.empty:
+        return {}
+    return {"financial_health": df.iloc[0]["FINANCIAL_HEALTH"]}
+
+
+profile = _fetch_profile(ticker)
+stock = _fetch_stock(ticker)
+fundamentals = _fetch_fundamentals(ticker)
+sentiment = _fetch_sentiment(ticker)
+sec_fin = _fetch_sec_fin(ticker)
 
 # ── Key Metrics Row ────────────────────────────────────────────
 section_header("Key Metrics", "Latest data from the analytics layer")
@@ -145,7 +141,7 @@ with c4:
     metric_card("Sentiment", score_str, trend if trend else None)
 with c5:
     pe = profile.get("pe_ratio")
-    metric_card("P/E Ratio", f"{pe:.1f}" if pe else "N/A")
+    metric_card("P/E Ratio", f"{pe:.1f}" if pe is not None else "N/A")
 
 st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
 
@@ -155,23 +151,27 @@ section_header("Market Signals")
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown("**Stock Trend**")
-    st.markdown(signal_html(stock.get("trend_signal", "N/A")), unsafe_allow_html=True)
+    sig = stock.get("trend_signal", "N/A")
+    st.markdown(render_badge(sig, sig), unsafe_allow_html=True)
 with c2:
     st.markdown("**Fundamentals**")
-    st.markdown(signal_html(fundamentals.get("fundamental_signal", "N/A")), unsafe_allow_html=True)
+    sig = fundamentals.get("fundamental_signal", "N/A")
+    st.markdown(render_badge(sig, sig), unsafe_allow_html=True)
 with c3:
     st.markdown("**Sentiment**")
-    st.markdown(signal_html(sentiment.get("sentiment_label", "N/A")), unsafe_allow_html=True)
+    sig = sentiment.get("sentiment_label", "N/A")
+    st.markdown(render_badge(sig, sig), unsafe_allow_html=True)
 with c4:
     st.markdown("**Financial Health**")
-    st.markdown(signal_html(sec_fin.get("financial_health", "N/A")), unsafe_allow_html=True)
+    sig = sec_fin.get("financial_health", "N/A")
+    st.markdown(render_badge(sig, sig), unsafe_allow_html=True)
 
 st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
 
 # ── Price Chart (Plotly with SMAs + Volume) ───────────────────
 section_header("Price History", "Last 90 trading days with moving averages")
 
-price_df = safe_query(session, f"""
+price_df = cached_query(f"""
     SELECT DATE, OPEN, HIGH, LOW, CLOSE, VOLUME, SMA_7D, SMA_30D, SMA_90D
     FROM ANALYTICS.FCT_STOCK_METRICS
     WHERE TICKER = '{ticker}'
@@ -263,7 +263,7 @@ st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
 # ── Recent Headlines ───────────────────────────────────────────
 section_header("Recent Headlines", "Latest news articles from the data pipeline")
 
-headlines_df = safe_query(session, f"""
+headlines_df = cached_query(f"""
     SELECT TITLE, PUBLISHED_AT, SOURCE_NAME
     FROM RAW.RAW_NEWS
     WHERE TICKER = '{ticker}'

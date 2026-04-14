@@ -18,6 +18,7 @@ import yaml
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.exceptions import AirflowException
 
 # Add project paths for modular loader imports
 sys.path.insert(0, '/opt/airflow')
@@ -52,7 +53,7 @@ dag = DAG(
     'data_collection_dag',
     default_args=default_args,
     description='Collect financial data from all sources and run dbt transformations',
-    schedule='0 17 * * 1-5',  # 5 PM weekdays
+    schedule='0 22 * * 1-5',  # 5 PM EST / 10 PM UTC weekdays
     start_date=datetime(2026, 1, 1),
     catchup=False,
     tags=['finsage', 'data-collection'],
@@ -108,8 +109,8 @@ def fetch_sec_data():
 def fetch_s3_filings():
     """Download SEC filings from EDGAR to S3 and extract text sections (MD&A, Risk Factors)."""
     try:
-        from sec_filings.filing_downloader import download_filings_for_ticker
-        from sec_filings.text_extractor import extract_pending_filings
+        from scripts.sec_filings.filing_downloader import download_filings_for_ticker
+        from scripts.sec_filings.text_extractor import extract_pending_filings
 
         for ticker in TICKERS:
             for form_type in ["10-K", "10-Q"]:
@@ -120,6 +121,37 @@ def fetch_s3_filings():
     except Exception as e:
         print(f"S3 filing pipeline error: {e}")
         raise
+
+
+def check_loaders_success():
+    """Gate: ensure each RAW table has new rows from today before running dbt."""
+    from src.utils.snowflake_client import SnowflakeClient
+    sf = SnowflakeClient()
+    raw_tables = [
+        'RAW.RAW_STOCK_PRICES',
+        'RAW.RAW_FUNDAMENTALS',
+        'RAW.RAW_NEWS',
+        'RAW.RAW_SEC_FILINGS',
+    ]
+    empty = []
+    try:
+        for table in raw_tables:
+            df = sf.query_to_dataframe(
+                f"SELECT COUNT(*) AS cnt FROM {table} "
+                f"WHERE ingested_at >= CURRENT_DATE()"
+            )
+            count = int(df.iloc[0]['CNT']) if not df.empty else 0
+            print(f"  {table}: {count} new rows today")
+            if count == 0:
+                empty.append(table)
+    finally:
+        sf.close()
+
+    if empty:
+        raise AirflowException(
+            f"Loader gate failed — no new rows today in: {', '.join(empty)}"
+        )
+    print("All loaders produced fresh rows — proceeding to dbt.")
 
 
 def data_quality_check():
@@ -178,6 +210,12 @@ task_fetch_s3_filings = PythonOperator(
     dag=dag,
 )
 
+task_check_loaders = PythonOperator(
+    task_id='check_loaders_success',
+    python_callable=check_loaders_success,
+    dag=dag,
+)
+
 task_run_dbt_staging = BashOperator(
     task_id='run_dbt_staging',
     bash_command=f'cd {DBT_DIR} && dbt run --select staging',
@@ -199,6 +237,7 @@ task_quality_check = PythonOperator(
 # ── Task dependencies ────────────────────────────────────────
 # All data fetchers run in parallel, then dbt staging, then analytics, then QC
 [task_fetch_stocks, task_fetch_fundamentals, task_fetch_news, task_fetch_sec, task_fetch_s3_filings] \
+    >> task_check_loaders \
     >> task_run_dbt_staging \
     >> task_run_dbt_analytics \
     >> task_quality_check

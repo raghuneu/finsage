@@ -6,7 +6,7 @@ from pathlib import Path
 
 from utils.connections import get_snowflake, get_kb, render_sidebar
 from utils.styles import inject_css
-from utils.helpers import page_header, section_header, sanitize_ticker, esc
+from utils.helpers import page_header, section_header, sanitize_ticker, esc, escape_latex
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -72,18 +72,19 @@ if cortex_available and kb_available:
 
 source = st.radio("Select source:", source_options, horizontal=True)
 
-# ── Suggested questions as pills ───────────────────────────
+# ── Suggested questions as clickable pills ────────────────
 suggestions = [
     f"What is {ticker}'s competitive advantage?",
     f"Summarize {ticker}'s risk factors",
     f"How has {ticker}'s revenue trended?",
     f"Key takeaways from {ticker}'s MD&A?",
 ]
-pills = " ".join(
-    f'<span class="pill-btn" style="cursor:default">{s}</span>'
-    for s in suggestions
-)
-st.markdown(f'<div style="margin:8px 0 16px">{pills}</div>', unsafe_allow_html=True)
+pill_cols = st.columns(len(suggestions))
+for i, (col, s) in enumerate(zip(pill_cols, suggestions)):
+    with col:
+        if st.button(s, key=f"ask_suggest_{i}", use_container_width=True):
+            st.session_state["_ask_prefill"] = s
+            st.rerun()
 
 # ── Chat interface ─────────────────────────────────────────
 if "ask_messages" not in st.session_state:
@@ -94,10 +95,10 @@ for msg in st.session_state["ask_messages"]:
     with st.chat_message(msg["role"]):
         if msg.get("source_label"):
             st.markdown(
-                f'<span class="pill-btn" style="cursor:default;font-size:0.7rem">{msg["source_label"]}</span>',
+                f'<span class="pill-btn" style="cursor:default;font-size:0.7rem">{esc(str(msg["source_label"]))}</span>',
                 unsafe_allow_html=True,
             )
-        st.markdown(msg["content"])
+        st.markdown(escape_latex(msg["content"]))
         if msg.get("citations"):
             with st.expander("Citations"):
                 for c in msg["citations"]:
@@ -105,8 +106,12 @@ for msg in st.session_state["ask_messages"]:
                     name = src.split("/")[-1] if src else "Unknown"
                     st.markdown(f'<div class="citation-box"><strong style="color:#00d4ff">{esc(name)}</strong></div>', unsafe_allow_html=True)
 
-# Chat input
-if q := st.chat_input(f"Ask about {ticker}..."):
+# Chat input (handle prefill from suggestion pills)
+_prefill = st.session_state.pop("_ask_prefill", None)
+q = st.chat_input(f"Ask about {ticker}...")
+if _prefill:
+    q = _prefill
+if q:
     st.session_state["ask_messages"].append({"role": "user", "content": q})
     with st.chat_message("user"):
         st.markdown(q)
@@ -119,7 +124,7 @@ if q := st.chat_input(f"Ask about {ticker}..."):
                 try:
                     from document_agent import ask_question
                     answer = ask_question(session, ticker, q)
-                    st.markdown(answer)
+                    st.markdown(escape_latex(answer))
                     st.session_state["ask_messages"].append({
                         "role": "assistant", "content": answer, "source_label": "Cortex",
                     })
@@ -141,7 +146,7 @@ if q := st.chat_input(f"Ask about {ticker}..."):
                     r = kb.ask(q, ticker=ticker)
                     answer = r.get("answer", "No answer returned.")
                     citations = r.get("citations", [])
-                    st.markdown(answer)
+                    st.markdown(escape_latex(answer))
                     if citations:
                         with st.expander("Citations"):
                             for c in citations:

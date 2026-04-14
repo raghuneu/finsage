@@ -1,6 +1,32 @@
 version: 2
 
 models:
+  - name: dim_date
+    description: "Calendar date dimension from 2020-01-01 to current date. Powers time-series joins and trading-day filters."
+    columns:
+      - name: date_day
+        description: "Calendar date (PK)"
+        tests:
+          - not_null
+          - unique
+      - name: year
+        description: "4-digit year"
+      - name: quarter
+        description: "Calendar quarter (1-4)"
+      - name: month
+        description: "Calendar month (1-12)"
+      - name: month_name
+        description: "Full month name (e.g., January)"
+      - name: week_of_year
+        description: "ISO week number (1-53)"
+      - name: day_of_week
+        description: "Day of week index (0=Sunday .. 6=Saturday)"
+      - name: day_name
+        description: "Full day name (e.g., Monday)"
+      - name: is_weekend
+        description: "TRUE on Saturday and Sunday"
+      - name: is_trading_day
+        description: "FALSE on Saturday and Sunday (weekday proxy; excludes holidays)"
   - name: fct_stock_metrics
     description: "Daily stock price metrics with rolling averages, volatility, and trend signals"
     columns:

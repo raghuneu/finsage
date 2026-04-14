@@ -9,7 +9,7 @@ import streamlit as st
 
 from utils.connections import get_kb, render_sidebar
 from utils.styles import inject_css
-from utils.helpers import page_header, section_header, sanitize_ticker, esc
+from utils.helpers import page_header, section_header, sanitize_ticker, esc, escape_latex
 
 inject_css()
 ticker = sanitize_ticker(render_sidebar())
@@ -49,7 +49,7 @@ with t1:
     # Display chat history
     for msg in st.session_state["rag_chat"]:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+            st.markdown(escape_latex(msg["content"]))
             if msg.get("citations"):
                 with st.expander("Citations", expanded=False):
                     for c in msg["citations"]:
@@ -65,8 +65,12 @@ with t1:
                             unsafe_allow_html=True,
                         )
 
-    # Chat input
-    if q := st.chat_input(f"Ask about {ticker}'s SEC filings..."):
+    # Chat input (handle prefill from suggestion pills)
+    _prefill = st.session_state.pop("_rag_prefill", None)
+    q = st.chat_input(f"Ask about {ticker}'s SEC filings...")
+    if _prefill:
+        q = _prefill
+    if q:
         # Add user message
         st.session_state["rag_chat"].append({"role": "user", "content": q})
         with st.chat_message("user"):
@@ -80,7 +84,7 @@ with t1:
                     answer = r.get("answer", "No answer was generated. Try rephrasing your question.")
                     citations = r.get("citations", [])
 
-                    st.markdown(answer)
+                    st.markdown(escape_latex(answer))
 
                     if citations:
                         with st.expander("Citations", expanded=False):
@@ -88,10 +92,11 @@ with t1:
                                 source = c.get("source", "")
                                 source_name = source.split("/")[-1] if source else "Unknown source"
                                 text_snippet = c.get("text", "")[:200]
+                                snippet_html = f'<br><span style="color:#6b7280;font-size:0.8rem">{esc(text_snippet)}...</span>' if text_snippet else ""
                                 st.markdown(
                                     f'<div class="citation-box">'
-                                    f'<strong style="color:#00d4ff">{source_name}</strong>'
-                                    f'{"<br><span style=color:#6b7280;font-size:0.8rem>" + text_snippet + "...</span>" if text_snippet else ""}'
+                                    f'<strong style="color:#00d4ff">{esc(source_name)}</strong>'
+                                    f'{snippet_html}'
                                     f'</div>',
                                     unsafe_allow_html=True,
                                 )
@@ -108,10 +113,22 @@ with t1:
 
     if not st.session_state["rag_chat"]:
         st.markdown(
-            '<div style="text-align:center;color:#4b5563;padding:40px 0">'
-            f'Ask a question about {ticker}\'s SEC filings to get started</div>',
+            '<div style="text-align:center;color:#4b5563;padding:24px 0 8px">'
+            f'Ask a question about {esc(ticker)}\'s SEC filings to get started</div>',
             unsafe_allow_html=True,
         )
+        # Clickable suggestion pills
+        suggestions = [
+            f"What are {ticker}'s key risk factors?",
+            f"Summarize {ticker}'s revenue growth",
+            f"What does {ticker}'s MD&A discuss?",
+        ]
+        pill_cols = st.columns(len(suggestions))
+        for i, (col, s) in enumerate(zip(pill_cols, suggestions)):
+            with col:
+                if st.button(s, key=f"rag_suggest_{i}", use_container_width=True):
+                    st.session_state["_rag_prefill"] = s
+                    st.rerun()
 
     # Clear chat button
     if st.session_state["rag_chat"]:
@@ -140,7 +157,7 @@ with t2:
                     st.markdown(f'<div style="margin-bottom:12px">Tickers found: {pills}</div>', unsafe_allow_html=True)
 
                 if analysis:
-                    st.markdown(analysis)
+                    st.markdown(escape_latex(analysis))
                 else:
                     st.markdown('<div style="color:#6b7280">No cross-ticker analysis was generated.</div>', unsafe_allow_html=True)
 

@@ -10,6 +10,13 @@ def esc(text) -> str:
     return _html.escape(str(text))
 
 
+def escape_latex(text: str) -> str:
+    """Escape dollar signs so Streamlit markdown doesn't interpret them as LaTeX."""
+    if not text:
+        return text
+    return text.replace("$", "\\$")
+
+
 def sanitize_ticker(ticker: str) -> str:
     """Validate and sanitize ticker symbol to prevent SQL injection."""
     cleaned = ticker.strip().upper()
@@ -34,22 +41,48 @@ _BULLISH = {"BULLISH", "STRONG_GROWTH", "EXCELLENT", "HEALTHY", "IMPROVING", "MO
 _BEARISH = {"BEARISH", "DECLINING", "UNPROFITABLE", "CRITICAL", "DETERIORATING"}
 
 
+def render_badge(label: str, signal: str) -> str:
+    """Return an HTML badge span colored by signal category.
+
+    Signal categories:
+      - BULLISH / GROWTH / STRONG_GROWTH / HEALTHY / EXCELLENT / IMPROVING → green
+      - BEARISH / DECLINING / UNPROFITABLE / HIGH_RISK / CRITICAL / DETERIORATING → red
+      - anything else → gray
+    """
+    s = (signal or "").upper()
+    if s in _BULLISH or s in {"HIGH_RISK"} and False:
+        bg = "#06d6a0"
+    elif s in _BULLISH:
+        bg = "#06d6a0"
+    elif s in _BEARISH or s == "HIGH_RISK":
+        bg = "#ef476f"
+    else:
+        bg = "#888888"
+    return (
+        f'<span style="background:{bg};color:#fff;'
+        f'border-radius:12px;padding:2px 10px;font-size:12px;'
+        f'font-weight:600">{esc(str(label))}</span>'
+    )
+
+
 def signal_html(s):
     """Return a colored signal badge as raw HTML."""
+    safe = esc(str(s))
     if s in _BULLISH:
-        return f'<span class="signal-bullish">&#9650; {s}</span>'
+        return f'<span class="signal-bullish">&#9650; {safe}</span>'
     elif s in _BEARISH:
-        return f'<span class="signal-bearish">&#9660; {s}</span>'
-    return f'<span class="signal-neutral">&#9679; {s}</span>'
+        return f'<span class="signal-bearish">&#9660; {safe}</span>'
+    return f'<span class="signal-neutral">&#9679; {safe}</span>'
 
 
 def signal_badge(s):
     """Return just the colored text (no background pill)."""
+    safe = esc(str(s))
     if s in _BULLISH:
-        return f'<span style="color:#00ff88;font-weight:700">&#9650; {s}</span>'
+        return f'<span style="color:#00ff88;font-weight:700">&#9650; {safe}</span>'
     elif s in _BEARISH:
-        return f'<span style="color:#ff3366;font-weight:700">&#9660; {s}</span>'
-    return f'<span style="color:#6b7280;font-weight:700">&#9679; {s}</span>'
+        return f'<span style="color:#ff3366;font-weight:700">&#9660; {safe}</span>'
+    return f'<span style="color:#6b7280;font-weight:700">&#9679; {safe}</span>'
 
 
 def metric_card(title, value, delta=None):
@@ -58,11 +91,11 @@ def metric_card(title, value, delta=None):
     if delta is not None:
         is_up = "+" in str(delta) or (isinstance(delta, (int, float)) and delta > 0)
         cls = "delta-up" if is_up else "delta-down"
-        delta_html = f'<div class="{cls}">{delta}</div>'
+        delta_html = f'<div class="{cls}">{esc(str(delta))}</div>'
     st.markdown(
         f'<div class="fs-card">'
-        f'<h4>{title}</h4>'
-        f'<div class="value">{value}</div>'
+        f'<h4>{esc(str(title))}</h4>'
+        f'<div class="value">{esc(str(value))}</div>'
         f'{delta_html}'
         f'</div>',
         unsafe_allow_html=True,
@@ -71,18 +104,18 @@ def metric_card(title, value, delta=None):
 
 def section_header(title, subtitle=None):
     """Render a styled section header with cyan accent border."""
-    sub = f"<p>{subtitle}</p>" if subtitle else ""
+    sub = f"<p>{esc(str(subtitle))}</p>" if subtitle else ""
     st.markdown(
-        f'<div class="fs-section"><h3>{title}</h3>{sub}</div>',
+        f'<div class="fs-section"><h3>{esc(str(title))}</h3>{sub}</div>',
         unsafe_allow_html=True,
     )
 
 
 def page_header(title, subtitle=None):
     """Render the page title with gradient accent bar."""
-    st.markdown(f'<div class="fs-title">{title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="fs-title">{esc(str(title))}</div>', unsafe_allow_html=True)
     if subtitle:
-        st.markdown(f'<div class="fs-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="fs-subtitle">{esc(str(subtitle))}</div>', unsafe_allow_html=True)
     st.markdown('<div class="fs-title-bar"></div>', unsafe_allow_html=True)
 
 
@@ -116,13 +149,41 @@ def safe_collect(session, sql):
         return []
 
 
+@st.cache_data(ttl=300)
+def cached_query(sql: str):
+    """Cached Snowflake query — uses module-level connection (no session arg)."""
+    from utils.connections import get_snowflake
+    session = get_snowflake()
+    if session is None:
+        return None
+    try:
+        return session.sql(sql).to_pandas()
+    except Exception as e:
+        st.error(f"Query failed: {e}")
+        return None
+
+
+@st.cache_data(ttl=60)
+def cached_kpi_query(sql: str):
+    """Cached Snowflake query for dashboard KPIs — 60s TTL."""
+    from utils.connections import get_snowflake
+    session = get_snowflake()
+    if session is None:
+        return None
+    try:
+        return session.sql(sql).to_pandas()
+    except Exception as e:
+        st.error(f"Query failed: {e}")
+        return None
+
+
 def ds_card(icon, name, subtitle):
     """Render a gradient data source card (dark theme)."""
     st.markdown(
         f'<div class="ds-card">'
-        f'<div class="icon">{icon}</div>'
-        f'<div class="name">{name}</div>'
-        f'<div class="sub">{subtitle}</div>'
+        f'<div class="icon">{esc(str(icon))}</div>'
+        f'<div class="name">{esc(str(name))}</div>'
+        f'<div class="sub">{esc(str(subtitle))}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -138,12 +199,12 @@ def health_card(service_name, status, details=None):
         "down": ("red", "Offline", "#ff3366"),
     }
     dot_cls, label, color = status_map.get(status, status_map["down"])
-    details_html = f'<div style="color:#4b5563;font-size:0.8rem;margin-top:8px">{details}</div>' if details else ""
+    details_html = f'<div style="color:#4b5563;font-size:0.8rem;margin-top:8px">{esc(str(details))}</div>' if details else ""
     st.markdown(
         f'<div class="health-card {status}">'
         f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
         f'<span class="status-dot {dot_cls}"></span>'
-        f'<span style="color:#f9fafb;font-weight:600;font-size:0.95rem">{service_name}</span>'
+        f'<span style="color:#f9fafb;font-weight:600;font-size:0.95rem">{esc(str(service_name))}</span>'
         f'</div>'
         f'<div style="color:{color};font-size:0.8rem;font-weight:600;margin-left:18px">{label}</div>'
         f'{details_html}'

@@ -33,6 +33,7 @@ import os
 import json
 import logging
 import time
+import uuid
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -41,6 +42,54 @@ from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+def _approx_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def _insert_benchmark_rows(run_id: str, ticker: Optional[str],
+                           prompt: str, responses: dict) -> None:
+    """Insert one row per model call into ANALYTICS.FCT_MODEL_BENCHMARKS."""
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from snowflake_connection import get_session
+        session = get_session()
+    except Exception as e:
+        logger.debug("Benchmark insert skipped — no Snowflake: %s", e)
+        return
+
+    prompt_tokens = _approx_tokens(prompt)
+    try:
+        for _, r in responses.items():
+            completion_tokens = _approx_tokens(r.get("output", ""))
+            session.sql(
+                """
+                INSERT INTO ANALYTICS.FCT_MODEL_BENCHMARKS
+                    (run_id, ticker, model_name, prompt_tokens,
+                     completion_tokens, latency_ms, ran_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP())
+                """,
+                params=[
+                    run_id,
+                    ticker,
+                    r.get("model"),
+                    prompt_tokens,
+                    completion_tokens,
+                    int(r.get("latency_ms") or 0),
+                ],
+            ).collect()
+    except Exception as e:
+        logger.warning("Benchmark insert failed: %s", e)
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # Default models to compare
@@ -164,7 +213,7 @@ class MultiModelAnalyzer:
             }
 
     def compare(self, question: str, context: str = None,
-                models: list = None) -> dict:
+                models: list = None, ticker: str = None) -> dict:
         """
         Run the same question through multiple models and compare.
 
@@ -227,7 +276,11 @@ ANSWER:"""
             "slowest_ms": slowest["latency_ms"] if slowest else None,
         }
 
+        run_id = str(uuid.uuid4())
+        _insert_benchmark_rows(run_id, ticker, prompt, responses)
+
         return {
+            "run_id": run_id,
             "question": question,
             "responses": responses,
             "summary": summary,
@@ -360,8 +413,10 @@ def get_ticker_context(ticker: str) -> str:
         # Fundamentals
         try:
             rows = session.sql(f"""
-                SELECT REVENUE, NET_INCOME, EPS, REVENUE_GROWTH_YOY_PCT,
-                       NET_MARGIN_PCT, FUNDAMENTAL_SIGNAL
+                SELECT REVENUE, NET_INCOME, EPS,
+                       REVENUE_GROWTH_YOY AS REVENUE_GROWTH_YOY_PCT,
+                       NET_MARGIN AS NET_MARGIN_PCT,
+                       FUNDAMENTAL_SIGNAL
                 FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
                 WHERE TICKER = '{ticker.upper()}'
                 ORDER BY FISCAL_QUARTER DESC LIMIT 1
@@ -381,7 +436,8 @@ def get_ticker_context(ticker: str) -> str:
         # Sentiment
         try:
             rows = session.sql(f"""
-                SELECT SENTIMENT_SCORE, SENTIMENT_LABEL, SENTIMENT_TREND
+                SELECT AVG_SENTIMENT_SCORE AS SENTIMENT_SCORE,
+                       SENTIMENT_LABEL, SENTIMENT_TREND
                 FROM ANALYTICS.FCT_NEWS_SENTIMENT_AGG
                 WHERE TICKER = '{ticker.upper()}'
                 ORDER BY NEWS_DATE DESC LIMIT 1
@@ -398,8 +454,11 @@ def get_ticker_context(ticker: str) -> str:
         # SEC financials
         try:
             rows = session.sql(f"""
-                SELECT TOTAL_REVENUE, NET_INCOME, OPERATING_MARGIN_PCT,
-                       RETURN_ON_EQUITY_PCT, DEBT_TO_EQUITY_RATIO, FINANCIAL_HEALTH
+                SELECT REVENUE AS TOTAL_REVENUE, NET_INCOME,
+                       OPERATING_MARGIN AS OPERATING_MARGIN_PCT,
+                       ROE AS RETURN_ON_EQUITY_PCT,
+                       DEBT_TO_EQUITY AS DEBT_TO_EQUITY_RATIO,
+                       FINANCIAL_HEALTH
                 FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
                 WHERE TICKER = '{ticker.upper()}'
                 ORDER BY FISCAL_YEAR DESC LIMIT 1

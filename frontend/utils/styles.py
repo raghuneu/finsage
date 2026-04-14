@@ -36,7 +36,6 @@ def create_plotly_template():
         paper_bgcolor="#0a0e17",
         plot_bgcolor="#111827",
         font=dict(color="#e5e7eb", family="Inter, system-ui, sans-serif", size=12),
-        title=dict(font=dict(color="#f9fafb", size=16)),
         xaxis=dict(
             gridcolor="#1f2937",
             linecolor="#1f2937",
@@ -48,11 +47,6 @@ def create_plotly_template():
             linecolor="#1f2937",
             zerolinecolor="#1f2937",
             tickfont=dict(color="#6b7280"),
-        ),
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#e5e7eb", size=11),
-            bordercolor="rgba(0,0,0,0)",
         ),
         hoverlabel=dict(
             bgcolor="#1a2332",
@@ -66,9 +60,31 @@ def create_plotly_template():
 
 
 def inject_css():
+    st.markdown(
+        '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">',
+        unsafe_allow_html=True,
+    )
     st.markdown("""<style>
     /* ─── Global ─── */
-    .stApp { background: #0a0e17; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    .stApp {
+        background: #0a0e17;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    .stApp *:not([class*="material"]):not([data-testid="stIconMaterial"]) {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+    }
+    .stApp code, .stApp pre {
+        font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+    }
+    /* Preserve Streamlit's icon fonts */
+    .material-symbols-rounded,
+    .material-symbols-outlined,
+    .material-icons,
+    [class*="material-symbols"],
+    [data-testid="stIconMaterial"] span {
+        font-family: 'Material Symbols Rounded', 'Material Icons' !important;
+    }
     .stApp > header { background: transparent !important; }
 
     /* Custom scrollbar */
@@ -327,6 +343,12 @@ def inject_css():
         color: #e5e7eb !important;
         background: #111827;
         border-color: #1f2937;
+    }
+
+    /* ─── Guardrail result -- amber for modified ─── */
+    .guardrail-modified {
+        background: rgba(255,170,0,0.05); border: 1px solid rgba(255,170,0,0.2);
+        padding: 16px; border-radius: 10px;
     }
 
     /* ─── Pill buttons ─── */

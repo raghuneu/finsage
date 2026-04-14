@@ -7,7 +7,23 @@ from pathlib import Path
 
 from utils.connections import get_multi_model, render_sidebar
 from utils.styles import inject_css, create_plotly_template
-from utils.helpers import page_header, section_header, metric_card, sanitize_ticker, esc
+from utils.helpers import page_header, section_header, metric_card, sanitize_ticker, esc, escape_latex
+
+import pandas as pd
+
+
+@st.cache_data(ttl=120)
+def _fetch_benchmarks():
+    from utils.helpers import cached_query
+    return cached_query("""
+        SELECT model_name,
+               AVG(latency_ms)         AS avg_latency_ms,
+               SUM(prompt_tokens + completion_tokens) AS total_tokens,
+               COUNT(*)                AS run_count
+        FROM ANALYTICS.FCT_MODEL_BENCHMARKS
+        GROUP BY model_name
+        ORDER BY avg_latency_ms
+    """)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -88,13 +104,13 @@ if st.button("Run Comparison", type="primary") and q:
             dot = "green" if success else "red"
             st.markdown(
                 f'<div class="fs-card" style="border-top:3px solid {color}">'
-                f'<h4><span class="status-dot {dot}"></span> {name}</h4>'
+                f'<h4><span class="status-dot {dot}"></span> {esc(name)}</h4>'
                 f'<div style="color:#4b5563;font-size:0.75rem;margin-bottom:8px">{latency:,}ms</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
             if success:
-                st.markdown(resp.get("output", "")[:800])
+                st.markdown(escape_latex(resp.get("output", "")[:800]))
             else:
                 st.markdown(f'<div style="color:#ff3366;font-size:0.85rem">{esc(resp.get("error", "Unknown error")[:200])}</div>', unsafe_allow_html=True)
 
@@ -103,7 +119,9 @@ if st.button("Run Comparison", type="primary") and q:
     if consensus_text:
         st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
         section_header("Consensus Analysis")
-        st.markdown(f'<div class="consensus-box">{esc(consensus_text)}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="consensus-box">', unsafe_allow_html=True)
+        st.markdown(escape_latex(consensus_text))
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # ── Performance Summary ─────────────────────────────────
     st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
@@ -145,6 +163,22 @@ if st.button("Run Comparison", type="primary") and q:
             textfont=dict(color="#e5e7eb"),
         ))
         fig.update_layout(**TPL, height=max(200, len(names) * 50),
-            title="Response Latency (ms)", showlegend=False,
-            yaxis=dict(autorange="reversed"))
+            title="Response Latency (ms)", showlegend=False)
+        fig.update_layout(yaxis=dict(autorange="reversed"))
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+# ── Historical benchmarks from Snowflake ──────────────────────
+section_header("Historical Model Benchmarks", "Aggregated across all prior compare() runs (cached 120s)")
+bench_df = _fetch_benchmarks()
+if bench_df is not None and not bench_df.empty:
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Avg Latency (ms) per Model**")
+        st.bar_chart(bench_df.set_index("MODEL_NAME")["AVG_LATENCY_MS"])
+    with c2:
+        st.markdown("**Total Tokens per Model**")
+        st.bar_chart(bench_df.set_index("MODEL_NAME")["TOTAL_TOKENS"])
+    st.dataframe(bench_df, use_container_width=True)
+else:
+    st.caption("No benchmark history yet — run a compare() to populate FCT_MODEL_BENCHMARKS.")

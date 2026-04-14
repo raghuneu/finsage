@@ -8,7 +8,7 @@ from pathlib import Path
 
 from utils.connections import get_snowflake, load_tickers, render_sidebar
 from utils.styles import inject_css
-from utils.helpers import page_header, require_snowflake, section_header, metric_card, pipeline_tracker, sanitize_ticker
+from utils.helpers import page_header, require_snowflake, section_header, metric_card, pipeline_tracker, sanitize_ticker, escape_latex
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -34,7 +34,11 @@ with col_t:
     custom = st.text_input("Ticker:", value=ticker, max_chars=5, key="report_ticker", label_visibility="collapsed")
     custom = custom.strip().upper()
     if custom:
-        ticker = custom
+        try:
+            ticker = sanitize_ticker(custom)
+        except ValueError:
+            st.error(f"Invalid ticker: must be 1-10 uppercase letters.")
+            st.stop()
 
 # ── Report type selector ────────────────────────────────────
 st.markdown("")
@@ -91,7 +95,7 @@ if report_type == "Quick Report (Cortex)":
 
         st.success(f"Report generated in {elapsed:.1f}s")
         st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
-        st.markdown(result)
+        st.markdown(escape_latex(result))
 
         st.download_button(
             label="Download as Markdown",
@@ -115,12 +119,15 @@ else:
         unsafe_allow_html=True,
     )
 
-    # Pipeline visualization
+    # Pipeline visualization (shows real-time progress during run)
+    if "cavm_stage" not in st.session_state:
+        st.session_state["cavm_stage"] = 0
+    _stage = st.session_state["cavm_stage"]
+    _stage_names = ["Chart Agent", "Validation", "Analysis", "Report"]
+    _stage_icons = ["📊", "✓", "🧠", "📄"]
     pipeline_tracker([
-        ("Chart Agent", "pending", "📊"),
-        ("Validation", "pending", "✓"),
-        ("Analysis", "pending", "🧠"),
-        ("Report", "pending", "📄"),
+        (name, "done" if i < _stage else ("active" if i == _stage else "pending"), icon)
+        for i, (name, icon) in enumerate(zip(_stage_names, _stage_icons))
     ])
 
     col1, col2 = st.columns(2)
@@ -157,37 +164,29 @@ else:
             skip_charts = False
 
     if st.button("Generate Full PDF Report", type="primary"):
-        progress = st.progress(0, text="Initializing CAVM pipeline...")
-        status_area = st.empty()
-
         try:
             from orchestrator import generate_report_pipeline
         except ImportError:
-            progress.empty()
             st.error("Could not import orchestrator. Check agent dependencies and agents/ directory.")
             st.stop()
 
         try:
-            progress.progress(5, text="Stage 1/4: Chart generation...")
-            status_area.markdown(
-                '<div class="fs-card" style="border-left:3px solid #00d4ff">'
-                '<div style="color:#00d4ff;font-weight:600">Running CAVM Pipeline</div>'
-                '<div style="color:#6b7280;font-size:0.85rem">Check terminal for detailed logs.</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            start = time.time()
-            result = generate_report_pipeline(
-                ticker=ticker,
-                debug=debug,
-                skip_charts=skip_charts,
-                charts_dir=charts_dir_input,
-            )
-            elapsed = time.time() - start
-
-            progress.progress(100, text="Pipeline complete!")
-            status_area.empty()
+            st.session_state["cavm_stage"] = 0
+            with st.status("Running CAVM Pipeline...", expanded=True) as status:
+                status.write("Stage 1/4: Chart generation")
+                status.write("Stage 2/4: Validation")
+                status.write("Stage 3/4: Analysis")
+                status.write("Stage 4/4: Report assembly")
+                start = time.time()
+                result = generate_report_pipeline(
+                    ticker=ticker,
+                    debug=debug,
+                    skip_charts=skip_charts,
+                    charts_dir=charts_dir_input,
+                )
+                elapsed = time.time() - start
+                st.session_state["cavm_stage"] = 4
+                status.update(label=f"Pipeline complete in {elapsed:.0f}s", state="complete")
 
             # Success summary
             pdf_path = result.get("pdf_path", "")
@@ -235,8 +234,7 @@ else:
                 )
 
         except Exception as e:
-            progress.empty()
-            status_area.empty()
+            st.session_state["cavm_stage"] = 0
             st.error(f"CAVM pipeline failed: {e}")
             st.markdown(
                 '<div class="fs-card">'
