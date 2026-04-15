@@ -49,10 +49,10 @@ _fh = logging.FileHandler(_LOG_DIR / "chart_agent.log")
 _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 logger.addHandler(_fh)
 
-CORTEX_MODEL_LLM = "llama3.1-70b"
-CORTEX_MODEL_VLM = "pixtral-large"
+CORTEX_MODEL_LLM = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
+CORTEX_MODEL_VLM = os.getenv("CORTEX_MODEL_VLM", "openai-gpt-5.2")
 MAX_REFINEMENT_ITERATIONS = 2
-VLM_CALL_TIMEOUT_SEC = 60
+VLM_CALL_TIMEOUT_SEC = 120
 PER_CHART_BUDGET_SEC = 180
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -165,7 +165,7 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
         WHERE TICKER = '{ticker.upper()}'
         LIMIT 1
     """).to_pandas()
-    dim_profit_margin = float(dim_df.iloc[0][0]) * 100 if not dim_df.empty and pd.notna(dim_df.iloc[0][0]) else None
+    dim_profit_margin = float(dim_df.iloc[0, 0]) * 100 if not dim_df.empty and pd.notna(dim_df.iloc[0, 0]) else None
 
     # Build merged dataframe from fundamentals as base
     if not fund_df.empty:
@@ -179,15 +179,21 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
         result["fiscal_year"] = result["fiscal_period"].str.extract(r'(\d{4})').astype(float)
 
         # Operating margin: compute from SEC operating_income / fundamentals revenue
-        # when both are available for the same reporting period
         result["operating_margin_pct"] = None
 
-        # Merge debt_to_equity from SEC table
+        # Merge debt_to_equity and operating_income from SEC table
         if not sec_df.empty:
             latest_dte = sec_df["debt_to_equity_ratio"].dropna().iloc[0] if sec_df["debt_to_equity_ratio"].notna().any() else None
             result["debt_to_equity_ratio"] = latest_dte
             latest_health = sec_df["financial_health"].iloc[0] if "financial_health" in sec_df.columns else "FAIR"
             result["financial_health"] = latest_health
+
+            # Compute operating margin from SEC operating_income / fundamentals revenue
+            if "operating_income" in sec_df.columns and sec_df["operating_income"].notna().any():
+                latest_op_income = sec_df["operating_income"].dropna().iloc[0]
+                latest_revenue = result["total_revenue"].dropna().iloc[-1] if result["total_revenue"].notna().any() else None
+                if latest_revenue and float(latest_revenue) != 0:
+                    result["operating_margin_pct"] = round(float(latest_op_income) / float(latest_revenue) * 100, 1)
         else:
             result["debt_to_equity_ratio"] = None
             result["financial_health"] = "FAIR"
@@ -283,6 +289,42 @@ def build_financial_health_summary(df: pd.DataFrame) -> dict:
     }
 
 
+def build_margin_trend_summary(df: pd.DataFrame) -> dict:
+    """Build data summary for margin trend chart (SEC data)."""
+    periods = df["fiscal_period"].tolist() if "fiscal_period" in df.columns else []
+    net_margins = df["net_margin"].dropna().tolist() if "net_margin" in df.columns else []
+    op_margins = df["operating_margin"].dropna().tolist() if "operating_margin" in df.columns else []
+    latest_net = round(float(net_margins[-1]) * 100, 1) if net_margins else None
+    latest_op = round(float(op_margins[-1]) * 100, 1) if op_margins else None
+    # Trend direction
+    if len(net_margins) >= 2:
+        margin_trend = "expanding" if net_margins[-1] > net_margins[-2] else "compressing"
+    else:
+        margin_trend = "insufficient data"
+    return {
+        "num_quarters": len(df),
+        "latest_net_margin_pct": latest_net,
+        "latest_operating_margin_pct": latest_op,
+        "margin_trend": margin_trend,
+    }
+
+
+def build_balance_sheet_summary(df: pd.DataFrame) -> dict:
+    """Build data summary for balance sheet composition chart (SEC data)."""
+    latest = df.iloc[-1]
+    total_assets = float(latest["total_assets"]) if pd.notna(latest.get("total_assets")) else 0
+    total_liab = float(latest["total_liabilities"]) if pd.notna(latest.get("total_liabilities")) else 0
+    equity = float(latest["stockholders_equity"]) if pd.notna(latest.get("stockholders_equity")) else 0
+    equity_pct = round(equity / total_assets * 100, 1) if total_assets else 0
+    return {
+        "total_assets_b": round(total_assets / 1e9, 1),
+        "total_liabilities_b": round(total_liab / 1e9, 1),
+        "stockholders_equity_b": round(equity / 1e9, 1),
+        "equity_pct": equity_pct,
+        "num_quarters": len(df),
+    }
+
+
 # ──────────────────────────────────────────────────────────────
 # Cortex / Vision helpers (shared via vision_utils)
 # ──────────────────────────────────────────────────────────────
@@ -345,6 +387,23 @@ import warnings
 warnings.filterwarnings("ignore")
 
 df = pd.read_csv(r"{csv_path}")
+
+# Auto-convert date/datetime columns so LLM code never sees raw epoch values
+for _col in df.columns:
+    if any(kw in _col for kw in ('date', 'DATE', 'Date')):
+        try:
+            # Try standard parsing first (handles ISO strings)
+            df[_col] = pd.to_datetime(df[_col], errors='coerce')
+            # If all NaT, try epoch seconds/milliseconds
+            if df[_col].isna().all():
+                raw = pd.read_csv(r"{csv_path}")[_col]
+                if raw.dtype in ('int64', 'float64'):
+                    if raw.mean() > 1e10:
+                        df[_col] = pd.to_datetime(raw, unit='ms', errors='coerce')
+                    else:
+                        df[_col] = pd.to_datetime(raw, unit='s', errors='coerce')
+        except Exception:
+            pass
 
 try:
 {indented_code}
@@ -740,6 +799,100 @@ lines2, labels2 = ax2.get_legend_handles_labels()
 ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
 """,
     },
+
+    "margin_trend": {
+        "title": "Profitability Margin Trend",
+        "iter1_prompt": lambda ticker, df: (
+            f"Generate a line chart for {ticker} margin trends. "
+            f"df has columns: fiscal_period, net_margin, operating_margin (as decimals 0-1). "
+            f"Multiply by 100 to show as percentages. Plot both as lines. "
+            f"figsize=(12,5). Title: '{ticker} Margin Trend'."
+        ),
+        "iter2_prompt": lambda ticker, df, code, critique: (
+            f"Improve this {ticker} margin trend chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Add: area fill under net_margin line, markers on data points, "
+            f"gridlines, y-axis label as 'Margin %', legend."
+        ),
+        "iter3_prompt": lambda ticker, df, code, critique: (
+            f"Create PROFESSIONAL {ticker} margin trend chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Requirements: net_margin*100 as filled area (#00b4d8 alpha=0.15) with solid line (#00b4d8 linewidth=2), "
+            f"operating_margin*100 as line (#06d6a0 linewidth=2 dashed), "
+            f"markers (o, s) on data points, ax.set_facecolor('#f8f9fa'), "
+            f"value labels on each point, gridlines, title fontsize=14 bold, figsize=(14,6). "
+            f"x-axis: fiscal_period labels. y-axis: 'Margin %'. "
+            f"Handle NaN gracefully with .fillna(method='ffill')."
+        ),
+        "fallback_code": """
+fig, ax = plt.subplots(figsize=(14, 6))
+ax.set_facecolor('#f8f9fa')
+fig.patch.set_facecolor('white')
+labels = df['fiscal_period'].tolist()
+x = range(len(df))
+net_m = df['net_margin'].fillna(0) * 100
+op_m = df['operating_margin'].fillna(0) * 100
+ax.fill_between(list(x), 0, net_m, alpha=0.15, color='#00b4d8')
+ax.plot(list(x), net_m, color='#00b4d8', linewidth=2, marker='o', markersize=6, label='Net Margin %')
+ax.plot(list(x), op_m, color='#06d6a0', linewidth=2, marker='s', markersize=6, linestyle='--', label='Operating Margin %')
+for i, (n, o) in enumerate(zip(net_m, op_m)):
+    if n != 0:
+        ax.annotate(f'{n:.1f}%', (i, n), textcoords='offset points', xytext=(0, 8), ha='center', fontsize=8, color='#00b4d8')
+    if o != 0:
+        ax.annotate(f'{o:.1f}%', (i, o), textcoords='offset points', xytext=(0, -12), ha='center', fontsize=8, color='#06d6a0')
+ax.set_xticks(list(x))
+ax.set_xticklabels(labels, rotation=30, fontsize=9, ha='right')
+ax.set_title('Profitability Margin Trend', fontsize=14, fontweight='bold')
+ax.set_ylabel('Margin %', fontsize=11)
+ax.set_xlabel('Fiscal Period', fontsize=11)
+ax.grid(True, color='#e0e0e0', alpha=0.7, linestyle='--', linewidth=0.5)
+ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
+""",
+    },
+
+    "balance_sheet": {
+        "title": "Balance Sheet Composition",
+        "iter1_prompt": lambda ticker, df: (
+            f"Generate a stacked bar chart for {ticker} balance sheet. "
+            f"df has columns: fiscal_period, total_assets, total_liabilities, stockholders_equity. "
+            f"Values are large numbers — divide by 1e9 to show in billions. "
+            f"figsize=(12,5). Title: '{ticker} Balance Sheet'."
+        ),
+        "iter2_prompt": lambda ticker, df, code, critique: (
+            f"Improve this {ticker} balance sheet chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Show liabilities and equity as stacked bars (should sum to ~total_assets). "
+            f"Add total_assets as a line overlay, axis labels in $B, legend."
+        ),
+        "iter3_prompt": lambda ticker, df, code, critique: (
+            f"Create PROFESSIONAL {ticker} balance sheet chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Requirements: stacked bars with total_liabilities (#ef476f alpha=0.7) on bottom "
+            f"and stockholders_equity (#06d6a0 alpha=0.7) stacked on top, "
+            f"total_assets as line (#00b4d8 linewidth=2, marker='D'), "
+            f"all values divided by 1e9 (show as $B), ax.set_facecolor('#f8f9fa'), "
+            f"y-axis: 'Amount ($B)', x-axis: fiscal_period labels, "
+            f"title fontsize=14 bold, figsize=(14,6), gridlines."
+        ),
+        "fallback_code": """
+fig, ax = plt.subplots(figsize=(14, 6))
+ax.set_facecolor('#f8f9fa')
+fig.patch.set_facecolor('white')
+labels = df['fiscal_period'].tolist()
+x = range(len(df))
+liab_b = df['total_liabilities'].fillna(0) / 1e9
+eq_b = df['stockholders_equity'].fillna(0) / 1e9
+assets_b = df['total_assets'].fillna(0) / 1e9
+ax.bar(list(x), liab_b, color='#ef476f', alpha=0.7, label='Total Liabilities')
+ax.bar(list(x), eq_b, bottom=liab_b, color='#06d6a0', alpha=0.7, label="Stockholders' Equity")
+ax.plot(list(x), assets_b, color='#00b4d8', linewidth=2, marker='D', markersize=7, label='Total Assets')
+for i, v in enumerate(assets_b):
+    ax.annotate(f'${v:.0f}B', (i, v), textcoords='offset points', xytext=(0, 8), ha='center', fontsize=8, fontweight='bold')
+ax.set_xticks(list(x))
+ax.set_xticklabels(labels, rotation=30, fontsize=9, ha='right')
+ax.set_title('Balance Sheet Composition', fontsize=14, fontweight='bold')
+ax.set_ylabel('Amount ($B)', fontsize=11)
+ax.set_xlabel('Fiscal Period', fontsize=11)
+ax.grid(True, axis='y', color='#e0e0e0', alpha=0.7, linestyle='--', linewidth=0.5)
+ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
+""",
+    },
 }
 
 
@@ -1025,12 +1178,28 @@ def generate_charts(
         "eps_trend":        (fund_df,  build_eps_summary),
         "sentiment":        (news_df,  build_sentiment_summary),
         "financial_health": (sec_df,   build_financial_health_summary),
+        "margin_trend":     (sec_df,   build_margin_trend_summary),
+        "balance_sheet":    (sec_df,   build_balance_sheet_summary),
+    }
+
+    # Minimum data rows required per chart for meaningful visualization
+    MIN_ROWS = {
+        "margin_trend": 3,
+        "balance_sheet": 3,
     }
 
     results = []
     for chart_id, (df, summary_fn) in chart_data_map.items():
         if df.empty:
             logger.warning("No data for chart '%s', skipping", chart_id)
+            continue
+
+        min_rows = MIN_ROWS.get(chart_id, 1)
+        if len(df) < min_rows:
+            logger.warning(
+                "Insufficient data for chart '%s' (%d rows, need %d), skipping",
+                chart_id, len(df), min_rows,
+            )
             continue
 
         # Compute data_summary BEFORE chart generation so VLM critique has context
@@ -1075,6 +1244,8 @@ def regenerate_single_chart(
         "eps_trend":        (fetch_fundamentals_growth,    build_eps_summary),
         "sentiment":        (fetch_news_sentiment,         build_sentiment_summary),
         "financial_health": (fetch_sec_financial_summary,  build_financial_health_summary),
+        "margin_trend":     (fetch_sec_financial_summary,  build_margin_trend_summary),
+        "balance_sheet":    (fetch_sec_financial_summary,  build_balance_sheet_summary),
     }
     if chart_id not in data_fetchers:
         raise ValueError(f"Unknown chart_id: {chart_id}")

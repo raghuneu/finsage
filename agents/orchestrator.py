@@ -31,10 +31,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(AGENTS_DIR))
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from snowflake_connection import get_session
 from chart_agent import generate_charts, regenerate_single_chart
 from validation_agent import validate_all_charts, validate_chart
-from analysis_agent import run_analysis, generate_company_overview, generate_peer_comparison
+from analysis_agent import run_analysis, generate_company_overview, generate_peer_comparison, generate_financial_deep_dive, generate_valuation_analysis
 from report_agent import generate_report
 
 logging.basicConfig(
@@ -129,6 +132,33 @@ def stage_analysis(session, charts: list, ticker: str) -> dict:
             "ticker": ticker,
             "peers": [],
             "comparison_summary": f"Peer comparison not available for {ticker}.",
+        }
+
+    # Financial Deep Dive
+    logger.info("━" * 50)
+    logger.info("STAGE 3c: Financial Deep Dive & Valuation")
+    logger.info("━" * 50)
+    try:
+        analysis["financial_deep_dive"] = generate_financial_deep_dive(session, ticker)
+        logger.info("Financial deep dive generated for %s", ticker)
+    except Exception as e:
+        logger.warning("Financial deep dive failed for %s: %s", ticker, e)
+        analysis["financial_deep_dive"] = {
+            "quarterly_data": [],
+            "narrative": "Financial deep dive not available.",
+            "balance_sheet_summary": "Balance sheet analysis not available.",
+        }
+
+    # Valuation Analysis
+    try:
+        analysis["valuation"] = generate_valuation_analysis(session, ticker)
+        logger.info("Valuation analysis generated for %s", ticker)
+    except Exception as e:
+        logger.warning("Valuation analysis failed for %s: %s", ticker, e)
+        analysis["valuation"] = {
+            "ticker_metrics": {},
+            "peer_metrics": [],
+            "valuation_narrative": "Valuation analysis not available.",
         }
 
     return analysis
@@ -277,6 +307,7 @@ def generate_report_pipeline(
     os.makedirs(run_dir, exist_ok=True)
 
     session = get_session()
+    pdf_path = None
 
     try:
         # ── Stage 1: Charts ──────────────────────────────────
@@ -347,6 +378,9 @@ def generate_report_pipeline(
         # ── Stage 4: Report (only passing charts) ────────────
         pdf_path = stage_report(ticker, passing_charts, analysis, run_dir)
 
+    except Exception as e:
+        logger.error("Pipeline failed: %s", e, exc_info=True)
+        raise
     finally:
         session.close()
 

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 # Cortex model to use
 # ──────────────────────────────────────────────────────────────
-CORTEX_MODEL = "mistral-large"
+CORTEX_MODEL = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
 
 # Max characters of SEC text to pass into SUMMARIZE
 MAX_SEC_TEXT_CHARS = 40_000
@@ -42,6 +42,8 @@ ANALYSIS_ORDER = [
     "revenue_growth",   # Fundamentals — explains price moves
     "eps_trend",        # Earnings — confirms fundamentals
     "financial_health", # Balance sheet — deeper fundamental
+    "margin_trend",     # Profitability trajectory — extends financial health
+    "balance_sheet",    # Capital structure — completes fundamental picture
     "sentiment",        # Market perception — ties it all together
 ]
 
@@ -52,6 +54,8 @@ KB_QUERIES = {
     "revenue_growth":   "revenue growth drivers business segments sales performance",
     "eps_trend":        "earnings per share profitability income growth quality",
     "financial_health": "balance sheet strength debt equity ratio financial condition liquidity",
+    "margin_trend":     "operating margin gross margin profitability cost structure efficiency",
+    "balance_sheet":    "total assets liabilities stockholders equity capital structure solvency",
     "sentiment":        "competitive position market perception brand strategy outlook",
 }
 
@@ -157,10 +161,12 @@ def _validate_with_guardrails(text: str, label: str = "output") -> str:
 # ──────────────────────────────────────────────────────────────
 CHART_PROMPTS = {
     "price_sma": """
-You are a senior equity research analyst writing a section of a professional financial report.
-Analyze the following stock price and moving average data for {ticker} and write a concise,
-insightful 3-4 sentence analysis. Focus on trend direction, momentum, and what the SMA
-crossover signals for near-term price action. Be specific with the numbers provided.
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following stock price and moving average data for {ticker}. Write a focused 4-6 sentence
+analysis covering: (1) current trend direction and strength based on SMA alignment, (2) short-term
+momentum implied by the 7D vs 30D SMA relationship, (3) medium-term trend health from the 30D vs 90D
+SMA, and (4) actionable implications for positioning. Reference specific price levels and percentages.
+Avoid generic statements — every sentence must add analytical value.
 
 Data:
 - Current Price: ${current_price}
@@ -170,56 +176,66 @@ Data:
 - Trend Signal: {trend_signal}
 - Date Range: {date_range}
 
-Write the analysis in third person, professional tone. Do not use bullet points.
+Write in third person, professional tone. Do not use bullet points or headers.
 """,
 
     "volatility": """
-You are a senior equity research analyst writing a section of a professional financial report.
-Analyze the following volume and volatility data for {ticker} and write a concise,
-insightful 3-4 sentence analysis. Comment on trading activity levels, price stability,
-and what this implies about investor sentiment and risk profile.
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following volume and volatility data for {ticker}. Write a focused 4-6 sentence analysis
+covering: (1) current volatility level relative to what is typical for large-cap equities, (2) what
+the daily range implies about intraday price risk, (3) volume context and liquidity profile, and
+(4) overall risk characterization for portfolio allocation purposes. Be quantitative.
+Avoid generic statements — every sentence must add analytical value.
 
 Data:
 - Average Daily Volume: {avg_volume:,}
 - 30-Day Volatility: {volatility_30d_pct}%
 - Average Daily Range: {daily_range_pct_avg}%
 
-Write the analysis in third person, professional tone. Do not use bullet points.
+Write in third person, professional tone. Do not use bullet points or headers.
 """,
 
     "revenue_growth": """
-You are a senior equity research analyst writing a section of a professional financial report.
-Analyze the following revenue and net income growth data for {ticker} and write a concise,
-insightful 3-4 sentence analysis. Comment on revenue trajectory, profitability trends,
-and overall fundamental strength.
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following revenue and net income growth data for {ticker}. Write a focused 4-6 sentence
+analysis covering: (1) revenue growth trajectory and whether it is accelerating or decelerating,
+(2) net income growth relative to revenue growth (margin expansion or compression), (3) what the
+fundamental signal implies about earnings quality, and (4) forward-looking sustainability of these
+growth rates. Reference the specific percentages provided. Avoid generic statements.
 
 Data:
 - Latest Revenue Growth (YoY): {latest_revenue_growth_yoy}%
 - Latest Net Income Growth (YoY): {latest_net_income_growth_yoy}%
 - Fundamental Signal: {fundamental_signal}
 
-Write the analysis in third person, professional tone. Do not use bullet points.
+Write in third person, professional tone. Do not use bullet points or headers.
 """,
 
     "eps_trend": """
-You are a senior equity research analyst writing a section of a professional financial report.
-Analyze the following earnings per share data for {ticker} and write a concise,
-insightful 3-4 sentence analysis. Comment on earnings quality, growth consistency,
-and shareholder value implications.
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following earnings per share data for {ticker}. Write a focused 4-6 sentence analysis
+covering: (1) current EPS level and what it implies about per-share profitability, (2) sequential
+(QoQ) vs year-over-year growth and whether earnings momentum is improving, (3) earnings quality
+signals (e.g., is EPS growth driven by margin expansion, revenue growth, or buybacks), and
+(4) implications for forward earnings estimates. Reference the specific figures provided.
+Avoid generic statements.
 
 Data:
 - Latest EPS: ${latest_eps}
 - EPS Growth (YoY): {eps_growth_yoy_pct}%
 - EPS Growth (QoQ): {eps_growth_qoq_pct}%
 
-Write the analysis in third person, professional tone. Do not use bullet points.
+Write in third person, professional tone. Do not use bullet points or headers.
 """,
 
     "sentiment": """
-You are a senior equity research analyst writing a section of a professional financial report.
-Analyze the following news sentiment data for {ticker} and write a concise,
-insightful 3-4 sentence analysis. Comment on market perception, sentiment momentum,
-and what media coverage implies about near-term investor confidence.
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following news sentiment data for {ticker}. Write a focused 4-6 sentence analysis
+covering: (1) current sentiment level and where it falls on the bearish-to-bullish spectrum,
+(2) whether sentiment is trending positively or negatively and at what pace, (3) media coverage
+volume and what it implies about institutional attention, and (4) how sentiment aligns with or
+diverges from the stock's fundamental and technical profile. Avoid vague characterizations —
+quantify sentiment strength and direction. Avoid generic statements.
 
 Data:
 - 7-Day Average Sentiment Score: {sentiment_score_7d_avg} (scale: -1 bearish to +1 bullish)
@@ -227,22 +243,63 @@ Data:
 - Sentiment Trend: {sentiment_trend}
 - Total Articles (Last 30 Days): {total_articles_30d}
 
-Write the analysis in third person, professional tone. Do not use bullet points.
+Write in third person, professional tone. Do not use bullet points or headers.
 """,
 
     "financial_health": """
-You are a senior equity research analyst writing a section of a professional financial report.
-Analyze the following financial health data for {ticker} sourced from SEC filings and write
-a concise, insightful 3-4 sentence analysis. Comment on balance sheet strength, profitability,
-leverage, and overall financial health rating.
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following financial health data for {ticker} sourced from SEC filings. Write a focused
+4-6 sentence analysis covering: (1) revenue scale and profitability as measured by net margin,
+(2) balance sheet leverage via debt-to-equity and what it implies about financial flexibility,
+(3) the overall health rating and whether it is justified by the underlying metrics, and
+(4) key risks or strengths in the capital structure. If operating margin data is available,
+comment on operational efficiency. Reference the specific figures provided. Avoid generic statements.
 
 Data:
 - Total Revenue: ${total_revenue:,.0f}
 - Net Margin: {net_margin_pct}%
+- Operating Margin: {operating_margin_pct}%
 - Debt-to-Equity Ratio: {debt_to_equity_ratio}
 - Financial Health Rating: {financial_health}
 
-Write the analysis in third person, professional tone. Do not use bullet points.
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "margin_trend": """
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following profitability margin trend data for {ticker}. Write a focused 4-6 sentence
+analysis covering: (1) the current level of net and operating margins and what they imply about
+cost structure, (2) whether margins are expanding or compressing and the likely drivers, (3) how
+the spread between operating and net margin reflects non-operating items (interest, tax), and
+(4) sustainability of current margin levels relative to industry norms. Be quantitative.
+Avoid generic statements.
+
+Data:
+- Quarters Covered: {num_quarters}
+- Latest Net Margin: {latest_net_margin_pct}%
+- Latest Operating Margin: {latest_operating_margin_pct}%
+- Margin Trend: {margin_trend}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "balance_sheet": """
+You are a senior equity research analyst writing a section of an institutional-grade financial report.
+Analyze the following balance sheet composition data for {ticker}. Write a focused 4-6 sentence
+analysis covering: (1) total asset scale and what it implies about the company's size, (2) the
+liability-to-equity mix and what it reveals about leverage and financial risk, (3) the equity
+percentage and whether it suggests conservative or aggressive financing, and (4) implications
+for the company's ability to weather economic downturns or fund growth. Reference the specific
+dollar amounts. Avoid generic statements.
+
+Data:
+- Total Assets: ${total_assets_b}B
+- Total Liabilities: ${total_liabilities_b}B
+- Stockholders' Equity: ${stockholders_equity_b}B
+- Equity as % of Assets: {equity_pct}%
+- Quarters Covered: {num_quarters}
+
+Write in third person, professional tone. Do not use bullet points or headers.
 """,
 }
 
@@ -339,17 +396,20 @@ def analyze_chart(session: Session, chart: dict, ticker: str,
         if prior_analyses:
             context_lines = []
             for pa in prior_analyses:
-                text = pa["analysis_text"][:250]
-                if len(pa["analysis_text"]) > 250:
+                text = pa["analysis_text"][:500]
+                if len(pa["analysis_text"]) > 500:
                     text += "..."
                 context_lines.append(f"- {pa['title']}: {text}")
 
             prompt += (
-                "\n\nPrior analysis context (cross-reference these findings where relevant):\n"
+                "\n\nPrior analysis context (you MUST cross-reference at least one prior finding):\n"
                 + "\n".join(context_lines)
-                + "\n\nBuild on the prior findings. Use phrases like 'consistent with', "
-                "'in contrast to', or 'aligning with the earlier observation that...' "
-                "where appropriate."
+                + "\n\nIntegrate the prior findings into your analysis. Specifically:\n"
+                "- Reference at least one prior observation by name (e.g., 'As noted in the Price & SMA analysis...')\n"
+                "- Identify whether this chart's data confirms, contradicts, or adds nuance to earlier findings\n"
+                "- Use connective phrases like 'consistent with', 'in contrast to', 'further supported by', "
+                "'this adds context to the earlier observation that...'\n"
+                "- If this chart reveals a divergence from prior trends, explicitly call it out as a risk or opportunity"
             )
 
         logger.info("Generating analysis for chart: %s", chart_id)
@@ -549,10 +609,14 @@ def synthesize_analyses(session: Session, analyses: list, ticker: str) -> str:
 
     thesis_question = (
         f"Synthesize the following individual analyses for {ticker} into a cohesive "
-        f"4-6 sentence investment thesis. Identify the dominant narrative, note any "
-        f"contradictions between technical and fundamental signals, and conclude "
-        f"with a forward-looking outlook. Do not use bullet points. Write in third "
-        f"person, professional tone."
+        f"investment thesis of 6-8 sentences structured as follows: "
+        f"(1) Open with the dominant narrative — is this a growth, value, or transitional story? "
+        f"(2) Summarize the bull case in 1-2 sentences citing specific metrics from the analyses. "
+        f"(3) Summarize the bear case or key risks in 1-2 sentences. "
+        f"(4) Note any contradictions between technical, fundamental, and sentiment signals. "
+        f"(5) Conclude with a forward-looking outlook and conviction level (high/moderate/low). "
+        f"Do not use bullet points or headers. Write in third person, professional tone. "
+        f"Every sentence must reference specific data from the analyses below."
     )
 
     # Integration 3: Try multi-model consensus first
@@ -697,11 +761,14 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
 
     # AI-generated company description via Cortex
     prompt = (
-        f"Write a concise 4-5 sentence company overview for {ticker} suitable for "
-        f"an equity research report. Cover the company's core business, key products "
-        f"and services, competitive position, and market presence. "
+        f"Write a comprehensive 6-8 sentence company overview for {ticker} suitable for "
+        f"an institutional equity research report. Cover:\n"
+        f"1. Core business description and key products/services\n"
+        f"2. Total addressable market (TAM) and industry positioning\n"
+        f"3. Competitive advantages and moats (brand, ecosystem, IP, scale)\n"
+        f"4. Key growth drivers and strategic initiatives\n"
         f"Key facts: Market cap {mc_str}, P/E ratio {pe_str}, net margin {margin_str}. "
-        f"Write in third person, professional tone. Do not use bullet points."
+        f"Write in third person, professional tone. Do not use bullet points or headers."
     )
 
     description = _cortex_complete(session, prompt)
@@ -709,6 +776,23 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
         description = f"Company overview not available for {ticker}."
     else:
         description = _validate_with_guardrails(description, label="company_overview")
+
+    # Competitive landscape via Cortex
+    peers = PEER_GROUPS.get(ticker, [])
+    peer_str = ", ".join(peers[:4]) if peers else "major industry peers"
+    comp_prompt = (
+        f"Write a concise 3-4 sentence competitive landscape analysis for {ticker} "
+        f"in the context of its primary competitors ({peer_str}). Cover relative market "
+        f"position, key differentiators, and competitive threats. "
+        f"Write in professional third-person tone."
+    )
+    competitive_landscape = _cortex_complete(session, comp_prompt)
+    if competitive_landscape:
+        competitive_landscape = _validate_with_guardrails(
+            competitive_landscape, label="competitive_landscape"
+        )
+    else:
+        competitive_landscape = ""
 
     # Business segments from Bedrock KB
     segments = ""
@@ -720,8 +804,19 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
                 ticker=ticker, max_results=3
             )
             if chunks:
-                segments = " ".join(c["text"][:300] for c in chunks[:2])
-                segments = _validate_with_guardrails(segments, label="business_segments")
+                raw_segment_text = "\n\n".join(c["text"] for c in chunks[:3])
+                # Use Cortex to synthesize a clean summary from raw KB chunks
+                seg_prompt = (
+                    f"Based on the following SEC filing excerpts for {ticker}, write a concise "
+                    f"2-3 sentence summary of the company's key business segments and their "
+                    f"revenue contributions. If specific percentages are available, include them. "
+                    f"Write in third person, professional tone.\n\n{raw_segment_text[:2000]}"
+                )
+                segments = _cortex_complete(session, seg_prompt)
+                if segments:
+                    segments = _validate_with_guardrails(segments, label="business_segments")
+                else:
+                    segments = raw_segment_text[:600]
                 logger.info("Retrieved business segment context for %s (%d chars)", ticker, len(segments))
         except Exception as e:
             logger.debug("KB segment retrieval skipped for %s: %s", ticker, e)
@@ -730,6 +825,7 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
         "company_description": description,
         "key_facts": facts,
         "business_segments": segments,
+        "competitive_landscape": competitive_landscape,
     }
     logger.info("Company overview generated for %s", ticker)
     return result
@@ -878,6 +974,232 @@ def generate_peer_comparison(session: Session, ticker: str) -> dict:
     }
     logger.info("Peer comparison generated for %s (%d peers)", ticker, len(peers_data) - 1)
     return result
+
+
+# ──────────────────────────────────────────────────────────────
+# Financial Deep Dive (called by orchestrator)
+# ──────────────────────────────────────────────────────────────
+
+def generate_financial_deep_dive(session: Session, ticker: str) -> dict:
+    """
+    Generate a Financial Deep Dive section with multi-quarter trend analysis.
+
+    Queries FCT_SEC_FINANCIAL_SUMMARY for balance sheet, income statement,
+    and cash position data across quarters, then uses Cortex to produce
+    narrative commentary on trends.
+
+    Returns:
+        {
+            "quarterly_data": list[dict],  # rows of quarterly financials
+            "narrative": str,              # LLM-generated trend analysis
+            "balance_sheet_summary": str,  # LLM commentary on balance sheet
+        }
+    """
+    logger.info("Generating financial deep dive for %s", ticker)
+
+    # Query multi-quarter SEC financials
+    query = f"""
+    SELECT FISCAL_YEAR, FISCAL_PERIOD, REVENUE, NET_INCOME, OPERATING_INCOME,
+           TOTAL_ASSETS, TOTAL_LIABILITIES, STOCKHOLDERS_EQUITY,
+           CASH_AND_EQUIVALENTS, NET_MARGIN, OPERATING_MARGIN, ROE, ROA,
+           DEBT_TO_EQUITY, REVENUE_GROWTH_YOY, NET_INCOME_GROWTH_YOY
+    FROM FINSAGE_DB.ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
+    WHERE TICKER = '{ticker}'
+    ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC
+    LIMIT 8
+    """
+    try:
+        df = session.sql(query).to_pandas()
+    except Exception as e:
+        logger.warning("Financial deep dive query failed for %s: %s", ticker, e)
+        df = None
+
+    quarterly_data = []
+    data_text = "No quarterly financial data available."
+
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            qd = {}
+            for col in df.columns:
+                val = row[col]
+                if hasattr(val, 'item'):
+                    val = val.item()
+                qd[col.lower()] = val
+            quarterly_data.append(qd)
+
+        # Format data for LLM prompt
+        lines = []
+        for q in quarterly_data[:6]:
+            period = f"{q.get('fiscal_period', 'N/A')} {int(q.get('fiscal_year', 0))}"
+            rev = q.get('revenue')
+            ni = q.get('net_income')
+            oi = q.get('operating_income')
+            ta = q.get('total_assets')
+            tl = q.get('total_liabilities')
+            cash = q.get('cash_and_equivalents')
+            roe = q.get('roe')
+            de = q.get('debt_to_equity')
+            rev_str = f"${rev/1e9:.2f}B" if rev and rev > 1e6 else "N/A"
+            ni_str = f"${ni/1e9:.2f}B" if ni and ni > 1e6 else "N/A"
+            oi_str = f"${oi/1e9:.2f}B" if oi and oi > 1e6 else "N/A"
+            ta_str = f"${ta/1e9:.1f}B" if ta and ta > 1e6 else "N/A"
+            tl_str = f"${tl/1e9:.1f}B" if tl and tl > 1e6 else "N/A"
+            cash_str = f"${cash/1e9:.1f}B" if cash and cash > 1e6 else "N/A"
+            roe_str = f"{roe:.1f}%" if roe else "N/A"
+            de_str = f"{de:.2f}" if de else "N/A"
+            lines.append(
+                f"{period}: Revenue {rev_str}, Net Income {ni_str}, Operating Income {oi_str}, "
+                f"Total Assets {ta_str}, Total Liabilities {tl_str}, Cash {cash_str}, "
+                f"ROE {roe_str}, D/E {de_str}"
+            )
+        data_text = "\n".join(lines)
+
+    # Generate narrative analysis
+    narrative_prompt = (
+        f"You are a senior equity research analyst. Analyze the following quarterly financial "
+        f"data for {ticker} and write a 3-4 paragraph analysis covering:\n"
+        f"1. Revenue and profitability trends over recent quarters\n"
+        f"2. Operating efficiency (operating margin trends)\n"
+        f"3. Key observations and inflection points\n\n"
+        f"Data:\n{data_text}\n\n"
+        f"Write in professional third-person tone suitable for an institutional research report. "
+        f"Reference specific numbers and quarters. Do not use bullet points or headers."
+    )
+    narrative = _cortex_complete(session, narrative_prompt)
+    if not narrative:
+        narrative = "Financial trend analysis not available."
+    else:
+        narrative = _validate_with_guardrails(narrative, label="financial_deep_dive")
+
+    # Generate balance sheet commentary
+    bs_prompt = (
+        f"Based on this financial data for {ticker}, write a concise 2-paragraph assessment "
+        f"of the company's balance sheet strength and cash position. Cover:\n"
+        f"1. Asset/liability composition and leverage (debt-to-equity trends)\n"
+        f"2. Cash position adequacy and capital allocation capacity\n\n"
+        f"Data:\n{data_text}\n\n"
+        f"Write in professional tone. Reference specific figures."
+    )
+    balance_sheet_summary = _cortex_complete(session, bs_prompt)
+    if not balance_sheet_summary:
+        balance_sheet_summary = "Balance sheet analysis not available."
+    else:
+        balance_sheet_summary = _validate_with_guardrails(
+            balance_sheet_summary, label="balance_sheet_summary"
+        )
+
+    logger.info("Financial deep dive generated for %s (%d quarters)", ticker, len(quarterly_data))
+    return {
+        "quarterly_data": quarterly_data,
+        "narrative": narrative,
+        "balance_sheet_summary": balance_sheet_summary,
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# Valuation Analysis (called by orchestrator)
+# ──────────────────────────────────────────────────────────────
+
+def generate_valuation_analysis(session: Session, ticker: str) -> dict:
+    """
+    Generate a relative valuation analysis comparing the ticker's
+    key valuation multiples against its peer group.
+
+    Returns:
+        {
+            "ticker_metrics": dict,        # P/E, margin, D/E for target
+            "peer_metrics": list[dict],     # same metrics for each peer
+            "valuation_narrative": str,     # LLM-generated valuation commentary
+        }
+    """
+    logger.info("Generating valuation analysis for %s", ticker)
+
+    peers = PEER_GROUPS.get(ticker, ["AAPL", "MSFT", "GOOGL"])
+    all_tickers = [ticker] + [p for p in peers if p != ticker]
+    ticker_list = ", ".join(f"'{t}'" for t in all_tickers)
+
+    query = f"""
+    SELECT d.TICKER, d.MARKET_CAP, d.PE_RATIO, d.PROFIT_MARGIN, d.DEBT_TO_EQUITY,
+           f.REVENUE, f.NET_INCOME, f.EPS, f.REVENUE_GROWTH_YOY, f.ROA
+    FROM FINSAGE_DB.ANALYTICS.DIM_COMPANY d
+    LEFT JOIN (
+        SELECT TICKER, REVENUE, NET_INCOME, EPS, REVENUE_GROWTH_YOY, ROA,
+               ROW_NUMBER() OVER (PARTITION BY TICKER ORDER BY FISCAL_QUARTER DESC) as rn
+        FROM FINSAGE_DB.ANALYTICS.FCT_FUNDAMENTALS_GROWTH
+    ) f ON d.TICKER = f.TICKER AND f.rn = 1
+    WHERE d.TICKER IN ({ticker_list})
+    """
+    try:
+        df = session.sql(query).to_pandas()
+    except Exception as e:
+        logger.warning("Valuation query failed for %s: %s", ticker, e)
+        return {
+            "ticker_metrics": {},
+            "peer_metrics": [],
+            "valuation_narrative": "Valuation analysis not available.",
+        }
+
+    ticker_metrics = {}
+    peer_metrics = []
+
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            metrics = {}
+            for col in df.columns:
+                val = row[col]
+                if hasattr(val, 'item'):
+                    val = val.item()
+                metrics[col.lower()] = val
+            if metrics.get("ticker") == ticker:
+                ticker_metrics = metrics
+            else:
+                peer_metrics.append(metrics)
+
+    # Format for LLM
+    def fmt_metrics(m):
+        t = m.get("ticker", "?")
+        mc = m.get("market_cap")
+        mc_s = f"${mc/1e12:.2f}T" if mc and mc > 1e12 else (f"${mc/1e9:.1f}B" if mc and mc > 1e9 else "N/A")
+        pe = m.get("pe_ratio")
+        pe_s = f"{pe:.1f}x" if pe else "N/A"
+        pm = m.get("profit_margin")
+        pm_s = f"{float(pm)*100:.1f}%" if pm and float(pm) < 1 else (f"{float(pm):.1f}%" if pm else "N/A")
+        rg = m.get("revenue_growth_yoy")
+        rg_s = f"{rg:.1f}%" if rg else "N/A"
+        return f"{t}: Market Cap {mc_s}, P/E {pe_s}, Margin {pm_s}, Rev Growth {rg_s}"
+
+    comp_lines = [fmt_metrics(ticker_metrics)] if ticker_metrics else []
+    for pm in peer_metrics:
+        comp_lines.append(fmt_metrics(pm))
+    comp_text = "\n".join(comp_lines)
+
+    val_prompt = (
+        f"You are a financial data analyst. Write a 2-3 paragraph factual comparison "
+        f"of {ticker}'s valuation multiples relative to its sector peers. Cover:\n"
+        f"1. How {ticker}'s P/E ratio compares numerically to peers and possible reasons "
+        f"for any differences (growth profile, margin structure, market position)\n"
+        f"2. Whether {ticker}'s revenue growth rate is consistent with its multiple relative to peers\n"
+        f"3. A factual summary of where {ticker} sits in the peer group on each metric\n\n"
+        f"Comparative data:\n{comp_text}\n\n"
+        f"IMPORTANT: This is a factual data comparison only. Do NOT provide investment advice, "
+        f"price targets, buy/sell/hold recommendations, or predict future price movements. "
+        f"Stick to describing the data and observable differences. "
+        f"Write in professional analytical tone. Reference specific multiples and peers by name."
+    )
+    valuation_narrative = _cortex_complete(session, val_prompt)
+    if not valuation_narrative:
+        valuation_narrative = "Valuation analysis not available."
+    else:
+        valuation_narrative = _validate_with_guardrails(
+            valuation_narrative, label="valuation_analysis"
+        )
+
+    logger.info("Valuation analysis generated for %s vs %d peers", ticker, len(peer_metrics))
+    return {
+        "ticker_metrics": ticker_metrics,
+        "peer_metrics": peer_metrics,
+        "valuation_narrative": valuation_narrative,
+    }
 
 
 # ──────────────────────────────────────────────────────────────
