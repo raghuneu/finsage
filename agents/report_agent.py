@@ -130,10 +130,12 @@ def clean_llm_text(text: str) -> str:
     - Remove leading # headers
     - Convert leading '- ' bullet markers to '• '
     - Collapse runs of whitespace
+    - XML-escape &, <, > so ReportLab Paragraph() doesn't crash
     """
     if not text:
         return ""
     import re as _re
+    import html as _html
     out_lines = []
     for raw in str(text).splitlines():
         line = raw.rstrip()
@@ -144,6 +146,11 @@ def clean_llm_text(text: str) -> str:
         out_lines.append(line)
     cleaned = "\n".join(out_lines)
     cleaned = _re.sub(r"\n{3,}", "\n\n", cleaned)
+    # First unescape any existing HTML entities to normalise, then
+    # re-escape the three XML-special chars so ReportLab's Paragraph
+    # XML parser doesn't choke on bare &, <, >.
+    cleaned = _html.unescape(cleaned)
+    cleaned = cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return cleaned.strip()
 
 
@@ -533,10 +540,12 @@ def build_toc(charts: list, styles: dict) -> list:
 
     more_rows_data = [
         ("4.", "Financial Metrics Summary", str(page_cursor), True),
-        ("5.", "Peer Comparison", str(page_cursor + 2), True),
-        ("6.", "Risk Factors", str(page_cursor + 3), True),
-        ("7.", "Investment Recommendation", str(page_cursor + 5), True),
-        ("8.", "Appendix & Data Sources", str(page_cursor + 6), True),
+        ("5.", "Financial Deep Dive", str(page_cursor + 2), True),
+        ("6.", "Valuation Analysis", str(page_cursor + 4), True),
+        ("7.", "Peer Comparison", str(page_cursor + 5), True),
+        ("8.", "Risk Factors", str(page_cursor + 6), True),
+        ("9.", "Investment Recommendation", str(page_cursor + 8), True),
+        ("10.", "Appendix & Data Sources", str(page_cursor + 9), True),
     ]
 
     entry_style = ParagraphStyle("te", fontName="Helvetica", fontSize=11,
@@ -583,11 +592,11 @@ def build_toc(charts: list, styles: dict) -> list:
         alignment=TA_JUSTIFY,
     )
     elements.append(Paragraph(
-        "<b>Methodology:</b> This report was generated using the FinSage CAVM "
-        "(Chart-Analysis-Validation-Model) pipeline. Charts undergo a 3-iteration "
-        "VLM refinement loop using Snowflake Cortex pixtral-large for visual critique. "
-        "Analysis is powered by Cortex mistral-large with grounding in Snowflake ANALYTICS "
-        "layer data. SEC filing summaries leverage Cortex SUMMARIZE on 10-K/10-Q filings.",
+        f"<b>Methodology:</b> This report was generated using the FinSage CAVM "
+        f"(Chart-Analysis-Validation-Model) pipeline. Charts undergo a 3-iteration "
+        f"VLM refinement loop using Snowflake Cortex {os.getenv('CORTEX_MODEL_VLM', 'openai-gpt-5.2')} for visual critique. "
+        f"Analysis is powered by Cortex {os.getenv('CORTEX_MODEL_LLM', 'claude-opus-4-6')} with grounding in Snowflake ANALYTICS "
+        f"layer data. SEC filing summaries leverage Cortex SUMMARIZE on 10-K/10-Q filings.",
         method_style
     ))
 
@@ -820,6 +829,8 @@ def build_chart_section(chart: dict, analysis_text: str,
     if data_summary:
         metric_items = []
         for k, v in data_summary.items():
+            if v is None or str(v).strip().lower() == "none":
+                continue
             label = k.replace("_", " ").title()
             if isinstance(v, float):
                 val_str = f"{v:,.2f}"
@@ -876,7 +887,7 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict) -> list:
 
     # AI-generated company description
     description = overview.get("company_description", f"Company overview not available for {ticker}.")
-    elements.append(Paragraph(description, styles["body"]))
+    elements.append(Paragraph(clean_llm_text(description), styles["body"]))
     elements.append(Spacer(1, 6 * mm))
 
     # Key Facts table
@@ -936,7 +947,15 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict) -> list:
     if segments:
         elements.append(Paragraph("Business Segments &amp; Revenue Drivers", styles["appendix_header"]))
         elements.append(HRFlowable(width="100%", thickness=0.5, color=C_DIVIDER, spaceAfter=6))
-        elements.append(Paragraph(segments, styles["body"]))
+        elements.append(Paragraph(clean_llm_text(segments), styles["body"]))
+        elements.append(Spacer(1, 4 * mm))
+
+    # Competitive landscape
+    comp_landscape = overview.get("competitive_landscape", "")
+    if comp_landscape:
+        elements.append(Paragraph("Competitive Landscape", styles["appendix_header"]))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=C_DIVIDER, spaceAfter=6))
+        elements.append(Paragraph(clean_llm_text(comp_landscape), styles["body"]))
 
     elements.append(PageBreak())
     return elements
@@ -945,7 +964,7 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict) -> list:
 def build_peer_comparison(ticker: str, analysis: dict, styles: dict) -> list:
     """Build Peer Comparison page with metrics table + AI comparison summary."""
     elements = []
-    elements.append(Paragraph("5. Peer Comparison", styles["page_title"]))
+    elements.append(Paragraph("7. Peer Comparison", styles["page_title"]))
     elements.append(HRFlowable(
         width="100%", thickness=1.5,
         color=C_TEAL, spaceAfter=10
@@ -1045,7 +1064,7 @@ def build_peer_comparison(ticker: str, analysis: dict, styles: dict) -> list:
     if summary and "not available" not in summary.lower():
         elements.append(Paragraph("Comparative Analysis", styles["appendix_header"]))
         elements.append(HRFlowable(width="100%", thickness=0.5, color=C_DIVIDER, spaceAfter=6))
-        elements.append(Paragraph(summary, styles["body"]))
+        elements.append(Paragraph(clean_llm_text(summary), styles["body"]))
 
     elements.append(PageBreak())
     return elements
@@ -1054,7 +1073,7 @@ def build_peer_comparison(ticker: str, analysis: dict, styles: dict) -> list:
 def build_risk_section(risk_summary: str, charts: list, styles: dict) -> list:
     """Build expanded risk factors page with categorized risks."""
     elements = []
-    elements.append(Paragraph("6. Risk Factors", styles["page_title"]))
+    elements.append(Paragraph("8. Risk Factors", styles["page_title"]))
     elements.append(HRFlowable(
         width="100%", thickness=1.5,
         color=C_BEARISH, spaceAfter=10
@@ -1270,12 +1289,269 @@ def build_financial_metrics_page(charts: list, styles: dict) -> list:
     return elements
 
 
+
+def build_financial_deep_dive(ticker: str, analysis: dict, styles: dict) -> list:
+    """Build Financial Deep Dive section with quarterly data table and narrative."""
+    elements = []
+    elements.append(PageBreak())
+    elements.append(Paragraph("5. Financial Deep Dive", styles["page_title"]))
+    elements.append(HRFlowable(
+        width="100%", thickness=1.5,
+        color=C_TEAL, spaceAfter=10
+    ))
+
+    deep_dive = analysis.get("financial_deep_dive", {})
+    quarterly_data = deep_dive.get("quarterly_data", [])
+    narrative = deep_dive.get("narrative", "Financial trend analysis not available.")
+    bs_summary = deep_dive.get("balance_sheet_summary", "")
+
+    content_width = PAGE_W - 2 * MARGIN
+
+    # ── Income Statement Trends Table ────────────────────────
+    elements.append(Paragraph("Income Statement Trends", styles["appendix_header"]))
+
+    def _fmt_billions(v):
+        if v is None:
+            return "N/A"
+        try:
+            v = float(v)
+            if abs(v) >= 1e9:
+                return f"${v/1e9:.2f}B"
+            elif abs(v) >= 1e6:
+                return f"${v/1e6:.0f}M"
+            return f"${v:,.0f}"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _fmt_pct(v):
+        if v is None:
+            return "N/A"
+        try:
+            return f"{float(v):.1f}%"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    if quarterly_data:
+        header = ["Period", "Revenue", "Net Income", "Op. Income", "Net Margin", "Op. Margin"]
+        rows = [header]
+        for q in quarterly_data[:6]:
+            period = f"{q.get('fiscal_period', '?')} {int(q.get('fiscal_year', 0))}"
+            rows.append([
+                period,
+                _fmt_billions(q.get("revenue")),
+                _fmt_billions(q.get("net_income")),
+                _fmt_billions(q.get("operating_income")),
+                _fmt_pct(q.get("net_margin")),
+                _fmt_pct(q.get("operating_margin")),
+            ])
+
+        col_w = [content_width * w for w in [0.17, 0.17, 0.17, 0.17, 0.16, 0.16]]
+        inc_table = Table(rows, colWidths=col_w)
+        inc_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), C_DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_LIGHT_GRAY, C_WHITE]),
+            ("GRID", (0, 0), (-1, -1), 0.5, C_DIVIDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ]))
+        elements.append(inc_table)
+        elements.append(Spacer(1, 4 * mm))
+
+    # ── Balance Sheet Summary Table ──────────────────────────
+    elements.append(Paragraph("Balance Sheet Summary", styles["appendix_header"]))
+
+    if quarterly_data:
+        bs_header = ["Period", "Total Assets", "Total Liab.", "Equity", "Cash", "D/E Ratio", "ROE"]
+        bs_rows = [bs_header]
+        for q in quarterly_data[:6]:
+            period = f"{q.get('fiscal_period', '?')} {int(q.get('fiscal_year', 0))}"
+            de = q.get("debt_to_equity")
+            roe = q.get("roe")
+            bs_rows.append([
+                period,
+                _fmt_billions(q.get("total_assets")),
+                _fmt_billions(q.get("total_liabilities")),
+                _fmt_billions(q.get("stockholders_equity")),
+                _fmt_billions(q.get("cash_and_equivalents")),
+                f"{de:.2f}" if de is not None else "N/A",
+                _fmt_pct(roe),
+            ])
+
+        bs_col_w = [content_width * w for w in [0.15, 0.15, 0.15, 0.14, 0.14, 0.13, 0.14]]
+        bs_table = Table(bs_rows, colWidths=bs_col_w)
+        bs_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), C_DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_LIGHT_GRAY, C_WHITE]),
+            ("GRID", (0, 0), (-1, -1), 0.5, C_DIVIDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ]))
+        elements.append(bs_table)
+        elements.append(Spacer(1, 4 * mm))
+    else:
+        elements.append(Paragraph(
+            "Quarterly financial data not available for detailed analysis.",
+            styles["body"]
+        ))
+        elements.append(Spacer(1, 4 * mm))
+
+    # ── Narrative Analysis ───────────────────────────────────
+    elements.append(Paragraph("Trend Analysis", styles["appendix_header"]))
+    for para in clean_llm_text(narrative).split("\n\n"):
+        para = para.strip()
+        if para:
+            elements.append(Paragraph(para, styles["body"]))
+            elements.append(Spacer(1, 2 * mm))
+
+    # ── Balance Sheet Commentary ─────────────────────────────
+    if bs_summary and bs_summary != "Balance sheet analysis not available.":
+        elements.append(Spacer(1, 2 * mm))
+        elements.append(Paragraph("Balance Sheet Assessment", styles["appendix_header"]))
+        for para in clean_llm_text(bs_summary).split("\n\n"):
+            para = para.strip()
+            if para:
+                elements.append(Paragraph(para, styles["body"]))
+                elements.append(Spacer(1, 2 * mm))
+
+    return elements
+
+
+def build_valuation_section(ticker: str, analysis: dict, styles: dict) -> list:
+    """Build Valuation Analysis section with peer comparison table and narrative."""
+    elements = []
+    elements.append(PageBreak())
+    elements.append(Paragraph("6. Valuation Analysis", styles["page_title"]))
+    elements.append(HRFlowable(
+        width="100%", thickness=1.5,
+        color=C_TEAL, spaceAfter=10
+    ))
+
+    valuation = analysis.get("valuation", {})
+    ticker_metrics = valuation.get("ticker_metrics", {})
+    peer_metrics = valuation.get("peer_metrics", [])
+    narrative = valuation.get("valuation_narrative", "Valuation analysis not available.")
+
+    content_width = PAGE_W - 2 * MARGIN
+
+    # ── Relative Valuation Table ─────────────────────────────
+    elements.append(Paragraph("Relative Valuation Comparison", styles["appendix_header"]))
+
+    def _fmt_mcap(v):
+        if not v:
+            return "N/A"
+        try:
+            v = float(v)
+            if v >= 1e12:
+                return f"${v/1e12:.2f}T"
+            elif v >= 1e9:
+                return f"${v/1e9:.1f}B"
+            return f"${v/1e6:.0f}M"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _fmt_pe(v):
+        if not v:
+            return "N/A"
+        try:
+            return f"{float(v):.1f}x"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _fmt_margin(v):
+        if not v:
+            return "N/A"
+        try:
+            v = float(v)
+            if abs(v) < 1:
+                return f"{v*100:.1f}%"
+            return f"{v:.1f}%"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _fmt_growth(v):
+        if not v:
+            return "N/A"
+        try:
+            return f"{float(v):.1f}%"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    all_metrics = []
+    if ticker_metrics:
+        all_metrics.append(ticker_metrics)
+    all_metrics.extend(peer_metrics)
+
+    if all_metrics:
+        header = ["Ticker", "Market Cap", "P/E Ratio", "Profit Margin", "Rev Growth", "ROA"]
+        rows = [header]
+        for m in all_metrics:
+            rows.append([
+                m.get("ticker", "?"),
+                _fmt_mcap(m.get("market_cap")),
+                _fmt_pe(m.get("pe_ratio")),
+                _fmt_margin(m.get("profit_margin")),
+                _fmt_growth(m.get("revenue_growth_yoy")),
+                _fmt_margin(m.get("roa")),
+            ])
+
+        val_col_w = [content_width * w for w in [0.12, 0.20, 0.17, 0.17, 0.17, 0.17]]
+        val_table = Table(rows, colWidths=val_col_w)
+
+        # Highlight the target ticker row
+        table_styles = [
+            ("BACKGROUND", (0, 0), (-1, 0), C_DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_LIGHT_GRAY, C_WHITE]),
+            ("GRID", (0, 0), (-1, -1), 0.5, C_DIVIDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ]
+        # Bold the target ticker row
+        if ticker_metrics:
+            table_styles.append(("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"))
+            table_styles.append(("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#e6f7f2")))
+
+        val_table.setStyle(TableStyle(table_styles))
+        elements.append(val_table)
+        elements.append(Spacer(1, 6 * mm))
+    else:
+        elements.append(Paragraph(
+            "Peer valuation data not available.",
+            styles["body"]
+        ))
+        elements.append(Spacer(1, 6 * mm))
+
+    # ── Valuation Narrative ──────────────────────────────────
+    elements.append(Paragraph("Valuation Assessment", styles["appendix_header"]))
+    for para in clean_llm_text(narrative).split("\n\n"):
+        para = para.strip()
+        if para:
+            elements.append(Paragraph(para, styles["body"]))
+            elements.append(Spacer(1, 2 * mm))
+
+    return elements
+
+
 def build_recommendation_page(ticker: str, charts: list, analysis: dict,
                                styles: dict) -> list:
     """Build investment recommendation page with overall signal and thesis."""
     elements = []
     elements.append(PageBreak())
-    elements.append(Paragraph("7. Investment Recommendation", styles["page_title"]))
+    elements.append(Paragraph("9. Investment Recommendation", styles["page_title"]))
     elements.append(HRFlowable(
         width="100%", thickness=1.5,
         color=C_TEAL, spaceAfter=10
@@ -1392,7 +1668,7 @@ def build_appendix(ticker: str, charts: list, styles: dict) -> list:
     """Build appendix + disclaimer page."""
     elements = []
     elements.append(PageBreak())
-    elements.append(Paragraph("8. Appendix &amp; Data Sources", styles["page_title"]))
+    elements.append(Paragraph("10. Appendix &amp; Data Sources", styles["page_title"]))
     elements.append(HRFlowable(
         width="100%", thickness=1.5,
         color=C_TEAL, spaceAfter=10
@@ -1466,8 +1742,8 @@ def build_appendix(ticker: str, charts: list, styles: dict) -> list:
     pipeline_rows = [
         ["Stage", "Agent", "Technology", "Purpose"],
         ["1. Chart", "chart_agent", "Cortex LLM + VLM", "3-iteration chart generation with visual critique refinement loop"],
-        ["2. Validation", "validation_agent", "Cortex pixtral-large", "Chart quality assurance — file integrity, dimensions, VLM scoring"],
-        ["3. Analysis", "analysis_agent", "Cortex mistral-large", "Per-chart financial analysis + SEC MD&A/Risk summarization"],
+        ["2. Validation", "validation_agent", f"Cortex {os.getenv('CORTEX_MODEL_VLM', 'openai-gpt-5.2')}", "Chart quality assurance — file integrity, dimensions, VLM scoring"],
+        ["3. Analysis", "analysis_agent", f"Cortex {os.getenv('CORTEX_MODEL_LLM', 'claude-opus-4-6')}", "Per-chart financial analysis + SEC MD&A/Risk summarization"],
         ["4. Report", "report_agent", "reportlab", "Branded PDF assembly with executive summary and recommendations"],
     ]
     pipe_table = Table(
@@ -1516,6 +1792,59 @@ def build_appendix(ticker: str, charts: list, styles: dict) -> list:
     ]))
     elements.append(arch_table)
     elements.append(Spacer(1, 10 * mm))
+
+    # Methodology Notes & Citations
+    elements.append(Paragraph("Methodology Notes &amp; Citations", styles["appendix_header"]))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=C_DIVIDER, spaceAfter=6))
+    citation_rows = [
+        ["#", "Report Section", "Source / Methodology"],
+        ["1", "Price & SMA Analysis",
+         "Price data sourced from Yahoo Finance via yfinance API. "
+         "Simple Moving Averages (7D, 30D, 90D) computed in Snowflake ANALYTICS layer."],
+        ["2", "Volume & Volatility",
+         "30-day rolling volatility calculated as annualized standard deviation of daily returns. "
+         "Volume data from Yahoo Finance OHLCV feed."],
+        ["3", "Revenue & Net Income Growth",
+         "Quarterly fundamentals from Yahoo Finance. Year-over-year and quarter-over-quarter "
+         "growth rates computed in dbt transformation layer (FCT_FUNDAMENTALS_GROWTH)."],
+        ["4", "EPS Trend",
+         "Earnings per share from quarterly SEC filings (10-Q/10-K XBRL data) cross-validated "
+         "with Yahoo Finance fundamentals."],
+        ["5", "Financial Health",
+         "SEC EDGAR XBRL financial statements (FCT_SEC_FINANCIAL_SUMMARY). Health rating derived "
+         "from composite of net margin, debt-to-equity, and operating margin thresholds."],
+        ["6", "News Sentiment",
+         "Articles sourced from NewsAPI. Sentiment scored using Snowflake Cortex AI functions. "
+         "Rolling 7-day average and trend direction computed in ANALYTICS layer."],
+        ["7", "Investment Thesis",
+         "Multi-model consensus via AWS Bedrock (Llama3-8B, Mistral-7B, Llama3-70B) with "
+         f"Cortex {os.getenv('CORTEX_MODEL_LLM', 'claude-opus-4-6')} fallback. All outputs validated by Bedrock Guardrails."],
+        ["8", "Financial Deep Dive",
+         "Up to 8 quarters of SEC filing data from FCT_SEC_FINANCIAL_SUMMARY. Narrative "
+         f"analysis generated by Cortex {os.getenv('CORTEX_MODEL_LLM', 'claude-opus-4-6')} with trend identification."],
+        ["9", "Valuation Analysis",
+         "Relative valuation metrics from DIM_COMPANY. Peer group comparisons using "
+         "P/E ratio, profit margin, and debt-to-equity benchmarks."],
+    ]
+    cite_table = Table(
+        citation_rows,
+        colWidths=[content_width * 0.05, content_width * 0.25, content_width * 0.70]
+    )
+    cite_table.setStyle(TableStyle([
+        ("BACKGROUND",     (0, 0), (-1, 0),  C_DARK),
+        ("TEXTCOLOR",      (0, 0), (-1, 0),  C_WHITE),
+        ("FONTNAME",       (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",       (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_LIGHT_GRAY, C_WHITE]),
+        ("GRID",           (0, 0), (-1, -1), 0.5, C_DIVIDER),
+        ("TOPPADDING",     (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 5),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 6),
+        ("VALIGN",         (0, 0), (-1, -1), "TOP"),
+        ("ALIGN",          (0, 0), (0, -1),  "CENTER"),
+    ]))
+    elements.append(cite_table)
+    elements.append(Spacer(1, 8 * mm))
 
     # Disclaimer
     elements.append(HRFlowable(
@@ -1651,20 +1980,26 @@ def build_pdf(
     # Pages 12-13: Financial Metrics Summary
     elements += build_financial_metrics_page(charts, styles)
 
-    # Page 14: Peer Comparison
+    # Pages 14-15: Financial Deep Dive
+    elements += build_financial_deep_dive(ticker, analysis, styles)
+
+    # Page 16: Valuation Analysis
+    elements += build_valuation_section(ticker, analysis, styles)
+
+    # Page 17: Peer Comparison
     elements += build_peer_comparison(ticker, analysis, styles)
 
-    # Pages 15-16: Risk Factors (expanded with categories)
+    # Pages 18-19: Risk Factors (expanded with categories)
     elements += build_risk_section(
         analysis.get("risk_summary", "Risk factors not available."),
         charts,
         styles
     )
 
-    # Page 17: Investment Recommendation
+    # Page 20: Investment Recommendation
     elements += build_recommendation_page(ticker, charts, analysis, styles)
 
-    # Pages 18-19: Appendix
+    # Pages 21-22: Appendix
     elements += build_appendix(ticker, charts, styles)
 
     # ── Build PDF ────────────────────────────────────────────
