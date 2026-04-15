@@ -8,7 +8,6 @@ Implements FinSight paper Section 2.4:
 Model split (mirrors FinSight architecture):
     LLM role  → Snowflake Cortex (llama3.1-70b) — code generation
     VLM role  → Snowflake Cortex (llama3.1-70b) — text-based critique
-               (swap vlm_critique to Gemini once billing is enabled)
 
 Usage:
     # Works with no API keys — uses hardcoded data and mock responses
@@ -160,34 +159,14 @@ def llm_complete(session, model: str, prompt: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# VLM ROLE — Snowflake Cortex (llama3.1-70b) — text-based critique
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# NOTE: The FinSight paper uses Qwen2.5-VL-72B which critiques rendered images.
-# pixtral-large image input is blocked on Snowflake EDU accounts.
-# Gemini Flash (real image critique) can be swapped in once billing is enabled:
-#
-#   from google import genai
-#   from google.genai import types
-#   client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-#   with open(image_path, "rb") as f:
-#       image_bytes = f.read()
-#   response = client.models.generate_content(
-#       model="gemini-2.0-flash",
-#       contents=[
-#           types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-#           types.Part.from_text(text=prompt),
-#       ]
-#   )
-#   return response.text.strip()
-#
+# VLM ROLE — Snowflake Cortex — text-based critique
 # ══════════════════════════════════════════════════════════════════════════════
 
 def vlm_critique(session, model: str, image_path: str, prompt: str) -> str:
     """
     VLM role: critiques the chart via Cortex text reasoning.
-    image_path is accepted for interface consistency but not used until
-    Gemini billing is enabled (see swap instructions above).
+    image_path is accepted for interface consistency but not used;
+    critique is based on the text prompt and chart context.
     """
     from snowflake.cortex import complete
 

@@ -203,14 +203,16 @@ if session:
         try:
             import time as _t
             _t0 = _t.time()
-            session.sql("SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', 'Reply with only OK') AS result").collect()
+            _llm = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
+            session.sql(f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{_llm}', 'Reply with only OK') AS result").collect()
             _ms = int((_t.time() - _t0) * 1000)
-            st.markdown(f'<span class="status-dot green pulse"></span> **mistral-large** -- responding ({_ms}ms)', unsafe_allow_html=True)
+            st.markdown(f'<span class="status-dot green pulse"></span> **{_llm}** -- responding ({_ms}ms)', unsafe_allow_html=True)
         except Exception as e:
-            st.markdown(f'<span class="status-dot red"></span> **mistral-large** -- {esc(e)}', unsafe_allow_html=True)
+            st.markdown(f'<span class="status-dot red"></span> **{_llm}** -- {esc(e)}', unsafe_allow_html=True)
 
     with c_vlm:
-        st.markdown('<span class="status-dot amber"></span> **pixtral-large** -- not tested (needs image)', unsafe_allow_html=True)
+        _vlm = os.getenv("CORTEX_MODEL_VLM", "openai-gpt-5.2")
+        st.markdown(f'<span class="status-dot amber"></span> **{_vlm}** -- not tested (needs image)', unsafe_allow_html=True)
 
     with c_sum:
         try:

@@ -6,7 +6,7 @@ and compares their outputs. Generates a consensus score showing
 where models agree and disagree.
 
 This delivers on FinSage's original promise of multi-LLM analysis
-(Gemini/Llama/Claude) that was in the README but never implemented.
+(Llama/Claude/Titan/Mistral) that was in the README but never implemented.
 
 Available models on Bedrock:
     - meta.llama3-8b-instruct-v1:0 (fast, good for quick analysis)
@@ -92,12 +92,17 @@ def _insert_benchmark_rows(run_id: str, ticker: Optional[str],
             pass
 
 
-# Default models to compare
-DEFAULT_MODELS = [
-    "meta.llama3-8b-instruct-v1:0",
-    "mistral.mistral-7b-instruct-v0:2",
-    "meta.llama3-70b-instruct-v1:0",
-]
+# Default models to compare (overridable via BEDROCK_MULTI_MODELS env var, comma-separated)
+_env_models = os.getenv("BEDROCK_MULTI_MODELS", "")
+DEFAULT_MODELS = (
+    [m.strip() for m in _env_models.split(",") if m.strip()]
+    if _env_models
+    else [
+        "meta.llama3-8b-instruct-v1:0",
+        "mistral.mistral-7b-instruct-v0:2",
+        "meta.llama3-70b-instruct-v1:0",
+    ]
+)
 
 
 class MultiModelAnalyzer:

@@ -201,17 +201,49 @@ pip install snowflake-snowpark-python yfinance pandas httpx beautifulsoup4 pytho
 
 4. **Configure credentials**
 
-Create `.env` file in project root:
+Copy `.env.example` to `.env` and fill in your values:
 
+```bash
+cp .env.example .env
 ```
-SNOWFLAKE_ACCOUNT=your_account
-SNOWFLAKE_USER=your_username
-SNOWFLAKE_PASSWORD=your_password
-SNOWFLAKE_ROLE=your_role
-SNOWFLAKE_WAREHOUSE=your_warehouse
+
+```env
+# ── Snowflake Connection ──────────────────────────────
+SNOWFLAKE_ACCOUNT=
+SNOWFLAKE_USER=
+SNOWFLAKE_PASSWORD=
+SNOWFLAKE_WAREHOUSE=FINSAGE_WH
 SNOWFLAKE_DATABASE=FINSAGE_DB
 SNOWFLAKE_SCHEMA=RAW
-NEWSAPI_KEY=your_newsapi_key
+
+# ── Data Source API Keys ─────────────────────────────
+# NewsAPI (financial news ingestion, rate-limited to 5 req/min)
+NEWSAPI_KEY=
+
+# ── SEC EDGAR ────────────────────────────────────────
+SEC_USER_AGENT=
+
+# ── AWS Credentials ──────────────────────────────────
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=us-east-1
+
+# ── AWS S3 (SEC filing document storage) ─────────────
+FINSAGE_S3_BUCKET=
+
+# ── AWS Bedrock (RAG, guardrails, multi-model) ───────
+BEDROCK_KB_ID=
+BEDROCK_MODEL_ID=meta.llama3-8b-instruct-v1:0
+BEDROCK_GUARDRAIL_ID=
+BEDROCK_GUARDRAIL_VERSION=DRAFT
+# Comma-separated list of Bedrock models for multi-model comparison
+BEDROCK_MULTI_MODELS=meta.llama3-8b-instruct-v1:0,mistral.mistral-7b-instruct-v0:2,meta.llama3-70b-instruct-v1:0
+
+# ── Snowflake Cortex AI Models ───────────────────────
+# Primary LLM (analysis, chart code gen, document agent)
+CORTEX_MODEL_LLM=claude-opus-4-6
+# Primary VLM (chart critique, validation); falls back to pixtral-large
+CORTEX_MODEL_VLM=openai-gpt-5.2
 ```
 
 5. **Initialize database**
