@@ -24,7 +24,7 @@ from agents.vision_utils import vision_critique as _vision_critique
 
 logger = logging.getLogger(__name__)
 
-CORTEX_MODEL_VLM = os.getenv("CORTEX_MODEL_VLM", "openai-gpt-5.2")
+CORTEX_MODEL_VLM = os.getenv("CORTEX_MODEL_VLM", "claude-sonnet-4-6")
 
 # Minimum acceptable file size for a chart (bytes)
 MIN_FILE_SIZE_BYTES = 10_000
@@ -102,7 +102,7 @@ def run_rule_checks(chart: dict) -> list:
 def run_vlm_check(session, chart: dict) -> dict:
     """
     Use VLM to evaluate chart quality for publication readiness.
-    Uses Cortex VLM (openai-gpt-5.2 primary, pixtral-large fallback).
+    Uses Cortex VLM (claude-sonnet-4-6 primary, pixtral-large fallback) with multimodal image input.
     Returns dict with passed (bool), score (0-10), and feedback.
     """
     chart_id = chart.get("chart_id", "unknown")

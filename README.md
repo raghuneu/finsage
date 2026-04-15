@@ -29,7 +29,7 @@ FinSage implements a three-stage pipeline:
 | dbt staging layer (4 views) | ✅ Done | `stg_stock_prices`, `stg_fundamentals`, `stg_news`, `stg_sec_filings` |
 | dbt analytics layer (6 tables) | ✅ Done | `dim_company`, `dim_date`, `fct_stock_metrics`, `fct_fundamentals_growth`, `fct_news_sentiment_agg`, `fct_sec_financial_summary` |
 | Multi-agent CAVM PDF generation | ✅ Done | Chart → Validation → Analysis → Report, reportlab output |
-| VLM chart refinement (3-iteration loop) | ✅ Done | Snowflake Cortex `pixtral-large` |
+| VLM chart refinement (3-iteration loop) | ✅ Done | Snowflake Cortex `claude-sonnet-4-6` |
 | Chart retry on validation failure | ✅ Done | Up to 3 attempts per chart, pipeline aborts if >2 skipped |
 | Streamlit frontend (10 pages) | ✅ Done | Dashboard, Pipeline, Analytics, SEC, RAG, Report, Multi-Model, Guardrails, Q&A, Status |
 | AWS Bedrock Knowledge Base RAG | ✅ Done | Llama 3 with citations, cross-ticker comparison |
@@ -46,7 +46,7 @@ FinSage implements a three-stage pipeline:
 
 ### Data Engineering
 
-- **Snowflake**: Cloud data warehouse + Cortex LLM/VLM (pixtral-large, mistral-large) + Cortex SUMMARIZE/SENTIMENT
+- **Snowflake**: Cloud data warehouse + Cortex LLM/VLM (claude-sonnet-4-6, mistral-large) + Cortex SUMMARIZE/SENTIMENT
 - **dbt 1.7**: Staging views + analytics tables with tests
 - **Apache Airflow 2.8**: Daily DAG (Docker Compose, CeleryExecutor)
 - **Snowpark Python**: In-warehouse Python execution
@@ -54,7 +54,7 @@ FinSage implements a three-stage pipeline:
 ### AI / Models
 
 - **AWS Bedrock**: Knowledge Base RAG (Llama 3), Guardrails, multi-model (Llama3 / Titan / Mistral / Claude)
-- **Snowflake Cortex**: `pixtral-large` VLM (chart critique), `mistral-large` LLM, `SUMMARIZE`, `SENTIMENT`
+- **Snowflake Cortex**: `claude-sonnet-4-6` VLM (chart critique), `mistral-large` LLM, `SUMMARIZE`, `SENTIMENT`
 - **boto3**: AWS SDK for Bedrock + S3
 
 ### Data Sources
@@ -243,7 +243,7 @@ BEDROCK_MULTI_MODELS=meta.llama3-8b-instruct-v1:0,mistral.mistral-7b-instruct-v0
 # Primary LLM (analysis, chart code gen, document agent)
 CORTEX_MODEL_LLM=claude-opus-4-6
 # Primary VLM (chart critique, validation); falls back to pixtral-large
-CORTEX_MODEL_VLM=openai-gpt-5.2
+CORTEX_MODEL_VLM=claude-sonnet-4-6
 ```
 
 5. **Initialize database**
