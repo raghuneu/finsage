@@ -47,13 +47,15 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 # Snowflake Cortex LLM helper
 # ──────────────────────────────────────────────────────────────
-def cortex_complete(session, prompt: str, model: str = "llama3.1-70b") -> str:
+def cortex_complete(session, prompt: str, model: str = None) -> str:
     """
     Call Snowflake Cortex LLM for text completion.
 
-    Available models: llama3.1-70b, llama3.1-8b, mistral-large2,
-                      gemma-7b, mixtral-8x7b
+    Available models: claude-opus-4-6, claude-4-sonnet, mistral-large2,
+                      llama4-maverick, llama3.1-405b
     """
+    if model is None:
+        model = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
     escaped_prompt = prompt.replace("'", "''")
 
     max_chars = 50000

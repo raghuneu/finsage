@@ -1,12 +1,12 @@
 """
 Shared vision/LLM utilities for FinSage agents.
 
-Provides a dual-backend vision critique function:
-    1. Gemini 2.0 Flash (real multimodal — sends actual chart image)
-    2. Cortex text-only fallback (enriched with data_summary context)
+Provides Cortex-based chart critique with fallback:
+    1. Primary: CORTEX_MODEL_VLM (default openai-gpt-5.2) via Snowflake Cortex
+    2. Fallback: pixtral-large via Snowflake Cortex (if primary fails)
 
-The Snowflake EDU account does NOT support image input via Cortex,
-so Gemini is required for true VLM chart critique.
+Both models are called through Snowflake Cortex COMPLETE() with
+data_summary context enrichment for informed critique.
 """
 
 import logging
@@ -14,41 +14,16 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# Cache the Gemini client across calls
-_gemini_client = None
-_gemini_checked = False
+FALLBACK_VLM = "pixtral-large"
 
 
-def _get_gemini_client():
-    """Lazy-load Gemini client. Returns None if unavailable."""
-    global _gemini_client, _gemini_checked
-    if _gemini_checked:
-        return _gemini_client
-
-    _gemini_checked = True
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.info("GEMINI_API_KEY not set — VLM will use Cortex text-only fallback")
-        return None
-
-    try:
-        from google import genai
-        _gemini_client = genai.Client(api_key=api_key)
-        logger.info("Gemini client initialized — real VLM image critique enabled")
-        return _gemini_client
-    except ImportError:
-        logger.warning("google-genai not installed — run: pip install google-genai")
-        return None
-    except Exception as e:
-        logger.warning(f"Gemini client init failed: {e}")
-        return None
-
-
-def cortex_complete(session, prompt: str, model: str = "mistral-large") -> str:
+def cortex_complete(session, prompt: str, model: str = None) -> str:
     """
     Call Snowflake Cortex COMPLETE() with the given prompt.
     Returns the generated text string.
     """
+    if model is None:
+        model = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
     safe = prompt.replace("'", "''")
     sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{model}', '{safe}') AS r"
     rows = session.sql(sql).collect()
@@ -64,27 +39,6 @@ def cortex_complete(session, prompt: str, model: str = "mistral-large") -> str:
         raw = "\n".join(lines).strip()
 
     return raw
-
-
-def _gemini_critique(image_path: str, prompt: str) -> str:
-    """Send image + prompt to Gemini 2.0 Flash for real multimodal critique."""
-    from google.genai import types
-
-    client = _get_gemini_client()
-    if not client:
-        return ""
-
-    with open(image_path, "rb") as f:
-        image_bytes = f.read()
-
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[
-            types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-            types.Part.from_text(text=prompt),
-        ],
-    )
-    return response.text.strip() if response.text else ""
 
 
 def _format_data_summary(data_summary: dict) -> str:
@@ -105,37 +59,28 @@ def _format_data_summary(data_summary: dict) -> str:
 
 def vision_critique(
     session, image_path: str, prompt: str,
-    data_summary: dict = None, model: str = "pixtral-large"
+    data_summary: dict = None, model: str = None
 ) -> str:
     """
-    Critique a chart using the best available vision backend.
+    Critique a chart using Cortex COMPLETE() with data context enrichment.
 
-    1. If Gemini is available: sends the actual chart image (real VLM).
-    2. If Gemini unavailable: uses Cortex text-only with data_summary
-       context so the critique has concrete data about chart contents.
+    Primary model: CORTEX_MODEL_VLM env var (default openai-gpt-5.2).
+    Fallback: pixtral-large if the primary model fails.
 
     Args:
-        session: Snowflake session (for Cortex fallback)
-        image_path: Path to the rendered chart PNG
+        session: Snowflake session
+        image_path: Path to the rendered chart PNG (unused, kept for API compat)
         prompt: Critique prompt text
-        data_summary: Dict of chart data metrics (for Cortex enrichment)
-        model: Cortex model for text-only fallback
+        data_summary: Dict of chart data metrics (for context enrichment)
+        model: Override model for critique
 
     Returns:
         Critique text string
     """
-    # Try Gemini first (real image critique)
-    client = _get_gemini_client()
-    if client and os.path.exists(image_path):
-        try:
-            result = _gemini_critique(image_path, prompt)
-            if result:
-                logger.debug("VLM critique via Gemini (real image)")
-                return result
-        except Exception as e:
-            logger.warning(f"Gemini critique failed, falling back to Cortex: {e}")
+    if model is None:
+        model = os.getenv("CORTEX_MODEL_VLM", "openai-gpt-5.2")
 
-    # Cortex fallback — enrich prompt with data context
+    # Enrich prompt with data context
     context = _format_data_summary(data_summary)
     if context:
         enriched_prompt = (
@@ -149,5 +94,23 @@ def vision_critique(
             f"Evaluate based on chart type and expected content.]"
         )
 
-    logger.debug("VLM critique via Cortex text-only (enriched with data_summary)")
-    return cortex_complete(session, enriched_prompt, model=model)
+    # Try primary model
+    try:
+        result = cortex_complete(session, enriched_prompt, model=model)
+        if result:
+            logger.debug("VLM critique via Cortex %s", model)
+            return result
+    except Exception as e:
+        logger.warning("Primary VLM model %s failed: %s — falling back to %s",
+                       model, e, FALLBACK_VLM)
+
+    # Fallback to pixtral-large
+    try:
+        result = cortex_complete(session, enriched_prompt, model=FALLBACK_VLM)
+        if result:
+            logger.debug("VLM critique via Cortex fallback %s", FALLBACK_VLM)
+            return result
+    except Exception as e:
+        logger.error("Fallback VLM model %s also failed: %s", FALLBACK_VLM, e)
+
+    return ""
