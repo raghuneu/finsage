@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+:root {
+  --bg-deepest: #F2F0EB;
+  --bg-default: #FAFAF7;
+  --bg-paper: #FFFFFF;
+  --border: #E8E4DB;
+  --blue: #0382B7;
+  --green: #9DCBB8;
+  --pink: #C96BAE;
+  --red: #E58B6D;
+  --topaz: #F8CB86;
+  --cream: #EBE1B2;
+  --text-primary: #2C2A25;
+  --text-secondary: #6B6760;
+  --text-dim: #9A9590;
+  --text-footer: #C4BFB5;
+}
+
+html,
+body {
+  background-color: var(--bg-default);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  font-family: 'DM Sans', 'Helvetica Neue', sans-serif;
+}
+
+/* Subtle warm ambient glow for light mode */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(201,107,174,0.03) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 90%, rgba(3,130,183,0.02) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D8D4CB;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C4BFB5;
+}
+
+/* Markdown rendered content */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  font-family: 'DM Serif Display', Georgia, serif;
+  color: var(--text-primary);
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.markdown-content h1 { font-size: 1.5rem; }
+.markdown-content h2 { font-size: 1.25rem; }
+.markdown-content h3 { font-size: 1.1rem; }
+.markdown-content p {
+  color: #4A4740;
+  line-height: 1.75;
+  margin-bottom: 0.75em;
+}
+.markdown-content ul,
+.markdown-content ol {
+  color: #4A4740;
+  padding-left: 1.5em;
+}
+.markdown-content li {
+  margin-bottom: 0.25em;
+}
+.markdown-content code {
+  background-color: rgba(3,130,183,0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: var(--blue);
+}
+.markdown-content strong {
+  color: var(--text-primary);
+}
+.markdown-content blockquote {
+  border-left: 3px solid var(--pink);
+  padding-left: 1em;
+  margin-left: 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.markdown-content a {
+  color: var(--blue);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(3,130,183,0.3);
+  transition: border-color 0.2s;
+}
+.markdown-content a:hover {
+  border-color: var(--blue);
+}
+
+/* Utility glow classes */
+.glow-pink {
+  box-shadow: 0 0 20px rgba(201,107,174,0.12);
+}
+.glow-blue {
+  box-shadow: 0 0 20px rgba(3,130,183,0.12);
+}
