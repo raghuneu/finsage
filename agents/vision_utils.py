@@ -12,6 +12,7 @@ Fallback VLM: pixtral-large via Snowflake Cortex
 
 import logging
 import os
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 FALLBACK_VLM = "pixtral-large"
 CHART_STAGE = "FINSAGE_DB.RAW.CHART_IMAGES_STAGE"
 _stage_ensured = False
+_stage_lock = threading.Lock()
 
 
 def ensure_chart_stage(session) -> None:
@@ -26,13 +28,16 @@ def ensure_chart_stage(session) -> None:
     global _stage_ensured
     if _stage_ensured:
         return
-    session.sql(
-        f"CREATE STAGE IF NOT EXISTS {CHART_STAGE} "
-        f"DIRECTORY = (ENABLE = TRUE) "
-        f"ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')"
-    ).collect()
-    _stage_ensured = True
-    logger.info("Chart image stage ensured: %s", CHART_STAGE)
+    with _stage_lock:
+        if _stage_ensured:          # double-checked locking
+            return
+        session.sql(
+            f"CREATE STAGE IF NOT EXISTS {CHART_STAGE} "
+            f"DIRECTORY = (ENABLE = TRUE) "
+            f"ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')"
+        ).collect()
+        _stage_ensured = True
+        logger.info("Chart image stage ensured: %s", CHART_STAGE)
 
 
 def upload_chart_to_stage(session, local_path: str) -> str:
@@ -55,12 +60,23 @@ def upload_chart_to_stage(session, local_path: str) -> str:
 def cortex_complete(session, prompt: str, model: str = None) -> str:
     """
     Call Snowflake Cortex COMPLETE() with the given prompt (text-only).
+
+    Uses the 2-arg form COMPLETE(model, prompt) which returns a plain string.
+    Snowflake's default temperature is already 0, so no options needed.
+
+    Args:
+        session: Snowflake session
+        prompt: The prompt text
+        model: Override model (default from CORTEX_MODEL_LLM env var)
+
     Returns the generated text string.
     """
     if model is None:
         model = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
     safe = prompt.replace("'", "''")
-    sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{model}', '{safe}') AS r"
+    sql = (
+        f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{model}', '{safe}') AS r"
+    )
     rows = session.sql(sql).collect()
     raw = rows[0]["R"].strip() if rows and rows[0]["R"] else ""
 
@@ -77,9 +93,13 @@ def cortex_complete(session, prompt: str, model: str = None) -> str:
 
 
 def _cortex_complete_multimodal(
-    session, prompt: str, stage_filename: str, model: str
+    session, prompt: str, stage_filename: str, model: str,
 ) -> str:
-    """Call Cortex COMPLETE() with a chart image via TO_FILE() for true visual critique."""
+    """Call Cortex COMPLETE() with a chart image via TO_FILE() for true visual critique.
+
+    Uses the 3-arg multimodal form: COMPLETE(model, prompt, file).
+    The multimodal variant does not support an options parameter.
+    """
     safe = prompt.replace("'", "''")
     sql = (
         f"SELECT SNOWFLAKE.CORTEX.COMPLETE("

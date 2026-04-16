@@ -21,6 +21,7 @@ import sys
 import json
 import logging
 import argparse
+import concurrent.futures
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +37,7 @@ load_dotenv()
 
 from snowflake_connection import get_session
 from chart_agent import generate_charts, regenerate_single_chart
+from chart_specs import CANONICAL_CHART_ORDER
 from validation_agent import validate_all_charts, validate_chart
 from analysis_agent import run_analysis, generate_company_overview, generate_peer_comparison, generate_financial_deep_dive, generate_valuation_analysis
 from report_agent import generate_report
@@ -99,67 +101,84 @@ def stage_validation(session, charts: list) -> list:
 
 
 def stage_analysis(session, charts: list, ticker: str) -> dict:
-    """Stage 3 — Generate analysis via analysis_agent."""
+    """Stage 3 — Generate analysis via analysis_agent.
+
+    Stage 3a (run_analysis) is serial due to Chain-of-Analysis cross-references.
+    Stage 3b/3c (overview, peer, deep dive, valuation) are independent and run
+    in parallel with per-thread Snowflake sessions.
+    """
     logger.info("━" * 50)
-    logger.info("STAGE 3: LLM Analysis")
+    logger.info("STAGE 3a: LLM Analysis (Chain-of-Analysis — serial)")
     logger.info("━" * 50)
     analysis = run_analysis(session, charts, ticker)
-    logger.info("Stage 3 complete: %d chart analyses + SEC summaries",
+    logger.info("Stage 3a complete: %d chart analyses + SEC summaries",
                 len(analysis.get("chart_analyses", [])))
 
-    # Generate Company Overview and Peer Comparison
+    # Stage 3b/3c: 4 independent LLM tasks — run in parallel
     logger.info("━" * 50)
-    logger.info("STAGE 3b: Company Overview & Peer Comparison")
+    logger.info("STAGE 3b/3c: Overview, Peer, Deep Dive, Valuation (parallel)")
     logger.info("━" * 50)
-    try:
-        analysis["company_overview"] = generate_company_overview(session, ticker)
-        logger.info("Company overview generated for %s", ticker)
-    except Exception as e:
-        logger.warning("Company overview failed for %s: %s", ticker, e)
-        analysis["company_overview"] = {
+
+    # Default fallback values for each task
+    _defaults = {
+        "company_overview": {
             "company_description": f"Company overview not available for {ticker}.",
             "key_facts": {},
             "business_segments": "",
-        }
-
-    try:
-        analysis["peer_comparison"] = generate_peer_comparison(session, ticker)
-        logger.info("Peer comparison generated for %s (%d peers)",
-                     ticker, len(analysis["peer_comparison"].get("peers", [])) - 1)
-    except Exception as e:
-        logger.warning("Peer comparison failed for %s: %s", ticker, e)
-        analysis["peer_comparison"] = {
+        },
+        "peer_comparison": {
             "ticker": ticker,
             "peers": [],
             "comparison_summary": f"Peer comparison not available for {ticker}.",
-        }
-
-    # Financial Deep Dive
-    logger.info("━" * 50)
-    logger.info("STAGE 3c: Financial Deep Dive & Valuation")
-    logger.info("━" * 50)
-    try:
-        analysis["financial_deep_dive"] = generate_financial_deep_dive(session, ticker)
-        logger.info("Financial deep dive generated for %s", ticker)
-    except Exception as e:
-        logger.warning("Financial deep dive failed for %s: %s", ticker, e)
-        analysis["financial_deep_dive"] = {
+        },
+        "financial_deep_dive": {
             "quarterly_data": [],
             "narrative": "Financial deep dive not available.",
             "balance_sheet_summary": "Balance sheet analysis not available.",
-        }
-
-    # Valuation Analysis
-    try:
-        analysis["valuation"] = generate_valuation_analysis(session, ticker)
-        logger.info("Valuation analysis generated for %s", ticker)
-    except Exception as e:
-        logger.warning("Valuation analysis failed for %s: %s", ticker, e)
-        analysis["valuation"] = {
+        },
+        "valuation": {
             "ticker_metrics": {},
             "peer_metrics": [],
             "valuation_narrative": "Valuation analysis not available.",
+        },
+    }
+
+    def _run_task(name, fn, tick):
+        worker_session = get_session()
+        try:
+            result = fn(worker_session, tick)
+            logger.info("%s generated for %s", name, tick)
+            return name, result
+        except Exception as e:
+            logger.warning("%s failed for %s: %s", name, tick, e)
+            return name, _defaults[name]
+        finally:
+            try:
+                worker_session.close()
+            except Exception:
+                pass
+
+    tasks = [
+        ("company_overview",    generate_company_overview),
+        ("peer_comparison",     generate_peer_comparison),
+        ("financial_deep_dive", generate_financial_deep_dive),
+        ("valuation",           generate_valuation_analysis),
+    ]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_run_task, name, fn, ticker): name
+            for name, fn in tasks
         }
+
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            try:
+                task_name, task_result = future.result()
+                analysis[task_name] = task_result
+            except Exception:
+                logger.exception("Unexpected failure in %s", name)
+                analysis[name] = _defaults[name]
 
     return analysis
 
@@ -360,6 +379,10 @@ def generate_report_pipeline(
                                chart_id, MAX_ATTEMPTS, reason)
 
         passing_charts = [c for c in validated_charts if c.get("validated")]
+
+        # ── Restore canonical chart ordering for deterministic PDF ──
+        chart_order_map = {cid: idx for idx, cid in enumerate(CANONICAL_CHART_ORDER)}
+        passing_charts.sort(key=lambda c: chart_order_map.get(c.get("chart_id", ""), 99))
 
         if len(skipped) > 2:
             details = "; ".join(f"{cid}: {r}" for cid, r in skipped)

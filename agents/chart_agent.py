@@ -51,8 +51,7 @@ logger.addHandler(_fh)
 
 CORTEX_MODEL_LLM = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
 CORTEX_MODEL_VLM = os.getenv("CORTEX_MODEL_VLM", "claude-sonnet-4-6")
-MAX_REFINEMENT_ITERATIONS = 3
-MIN_ACCEPTABLE_SCORE = 6.0
+FIXED_REFINEMENT_ITERATIONS = 2   # Deterministic: always exactly 2 iterations
 VLM_CALL_TIMEOUT_SEC = 120
 PER_CHART_BUDGET_SEC = 300
 
@@ -98,7 +97,7 @@ def fetch_fundamentals_growth(session, ticker: str) -> pd.DataFrame:
                EPS_GROWTH_QOQ_PCT,
                REVENUE_GROWTH_QOQ_PCT,
                NET_INCOME_GROWTH_QOQ_PCT,
-               NET_MARGIN_PCT AS NET_MARGIN,
+               NET_MARGIN_PCT,
                FUNDAMENTAL_SIGNAL
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER = '{ticker.upper()}'
@@ -130,89 +129,33 @@ def fetch_news_sentiment(session, ticker: str) -> pd.DataFrame:
 
 
 def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
-    """Fetch financial health data, merging SEC and fundamentals tables.
+    """Fetch financial health data directly from dbt-materialized FCT_SEC_FINANCIAL_SUMMARY.
 
-    FCT_SEC_FINANCIAL_SUMMARY has NULL margins for many tickers, so we
-    fall back to FCT_FUNDAMENTALS_GROWTH.NET_MARGIN and compute
-    operating_margin from SEC OPERATING_INCOME / fundamentals REVENUE.
+    This table already has ALL precomputed columns: total_revenue, net_income,
+    total_assets, total_liabilities, stockholders_equity, operating_income,
+    net_margin_pct, operating_margin_pct, debt_to_equity_ratio, financial_health, etc.
+
+    No runtime merges or computations needed — deterministic single-table query.
     """
-    # Primary: fundamentals table (has real NET_MARGIN)
-    fund_df = session.sql(f"""
-        SELECT FISCAL_QUARTER, REVENUE, NET_MARGIN_PCT AS NET_MARGIN, NET_INCOME
-        FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
-        WHERE TICKER = '{ticker.upper()}'
-        ORDER BY FISCAL_QUARTER
-    """).to_pandas()
-    fund_df.columns = [c.lower() for c in fund_df.columns]
-
-    # SEC table for debt/equity and operating income
-    sec_df = session.sql(f"""
+    df = session.sql(f"""
         SELECT FISCAL_YEAR, FISCAL_PERIOD,
+               TOTAL_REVENUE,
+               NET_INCOME,
+               OPERATING_INCOME,
+               TOTAL_ASSETS,
+               TOTAL_LIABILITIES,
+               STOCKHOLDERS_EQUITY,
+               NET_MARGIN_PCT,
+               OPERATING_MARGIN_PCT,
                DEBT_TO_EQUITY_RATIO,
                RETURN_ON_EQUITY_PCT,
-               OPERATING_INCOME,
                FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
         WHERE TICKER = '{ticker.upper()}'
-        ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD
-        LIMIT 10
+        ORDER BY FISCAL_YEAR, FISCAL_PERIOD
     """).to_pandas()
-    sec_df.columns = [c.lower() for c in sec_df.columns]
-
-    # DIM_COMPANY for fallback profit margin
-    dim_df = session.sql(f"""
-        SELECT PROFIT_MARGIN
-        FROM ANALYTICS.DIM_COMPANY
-        WHERE TICKER = '{ticker.upper()}'
-        LIMIT 1
-    """).to_pandas()
-    dim_profit_margin = float(dim_df.iloc[0, 0]) * 100 if not dim_df.empty and pd.notna(dim_df.iloc[0, 0]) else None
-
-    # Build merged dataframe from fundamentals as base
-    if not fund_df.empty:
-        result = fund_df[["fiscal_quarter", "revenue", "net_margin", "net_income"]].copy()
-        result.rename(columns={
-            "fiscal_quarter": "fiscal_period",
-            "revenue": "total_revenue",
-            "net_margin": "net_margin_pct",
-        }, inplace=True)
-        # Add fiscal_year column (extract from fiscal_quarter like "Q4 2025")
-        result["fiscal_year"] = result["fiscal_period"].str.extract(r'(\d{4})').astype(float)
-
-        # Operating margin: compute from SEC operating_income / fundamentals revenue
-        result["operating_margin_pct"] = None
-
-        # Merge debt_to_equity and operating_income from SEC table
-        if not sec_df.empty:
-            latest_dte = sec_df["debt_to_equity_ratio"].dropna().iloc[0] if sec_df["debt_to_equity_ratio"].notna().any() else None
-            result["debt_to_equity_ratio"] = latest_dte
-            latest_health = sec_df["financial_health"].iloc[0] if "financial_health" in sec_df.columns else "FAIR"
-            result["financial_health"] = latest_health
-
-            # Compute operating margin from SEC operating_income / fundamentals revenue
-            if "operating_income" in sec_df.columns and sec_df["operating_income"].notna().any():
-                latest_op_income = sec_df["operating_income"].dropna().iloc[0]
-                latest_revenue = result["total_revenue"].dropna().iloc[-1] if result["total_revenue"].notna().any() else None
-                if latest_revenue and float(latest_revenue) != 0:
-                    result["operating_margin_pct"] = round(float(latest_op_income) / float(latest_revenue) * 100, 1)
-        else:
-            result["debt_to_equity_ratio"] = None
-            result["financial_health"] = "FAIR"
-
-        # Fallback: if net_margin_pct is all NaN, use DIM_COMPANY
-        if result["net_margin_pct"].isna().all() and dim_profit_margin is not None:
-            result["net_margin_pct"] = dim_profit_margin
-
-        return result
-    else:
-        # Fallback to SEC-only data with DIM_COMPANY margin
-        df = sec_df.copy()
-        df["total_revenue"] = None
-        df["net_margin_pct"] = dim_profit_margin if dim_profit_margin is not None else 0.0
-        df["operating_margin_pct"] = None
-        if "operating_income" in df.columns:
-            df.drop(columns=["operating_income"], inplace=True)
-        return df
+    df.columns = [c.lower() for c in df.columns]
+    return df
 
 
 # ──────────────────────────────────────────────────────────────
@@ -292,11 +235,11 @@ def build_financial_health_summary(df: pd.DataFrame) -> dict:
 
 def build_margin_trend_summary(df: pd.DataFrame) -> dict:
     """Build data summary for margin trend chart (SEC data)."""
-    periods = df["fiscal_period"].tolist() if "fiscal_period" in df.columns else []
-    net_margins = df["net_margin"].dropna().tolist() if "net_margin" in df.columns else []
-    op_margins = df["operating_margin"].dropna().tolist() if "operating_margin" in df.columns else []
-    latest_net = round(float(net_margins[-1]) * 100, 1) if net_margins else None
-    latest_op = round(float(op_margins[-1]) * 100, 1) if op_margins else None
+    # Use _pct columns from dbt (already in percentage form)
+    net_margins = df["net_margin_pct"].dropna().tolist() if "net_margin_pct" in df.columns else []
+    op_margins = df["operating_margin_pct"].dropna().tolist() if "operating_margin_pct" in df.columns else []
+    latest_net = round(float(net_margins[-1]), 1) if net_margins else None
+    latest_op = round(float(op_margins[-1]), 1) if op_margins else None
     # Trend direction
     if len(net_margins) >= 2:
         margin_trend = "expanding" if net_margins[-1] > net_margins[-2] else "compressing"
@@ -331,6 +274,9 @@ def build_balance_sheet_summary(df: pd.DataFrame) -> dict:
 # ──────────────────────────────────────────────────────────────
 
 from agents.vision_utils import cortex_complete, vision_critique
+from agents.chart_data_prep import PREPARE_FUNCTIONS
+from agents.chart_specs import CANONICAL_CHART_ORDER, get_constraint_text
+from agents.chart_validation import validate_chart_data, ChartDataValidationError
 
 
 # ──────────────────────────────────────────────────────────────
@@ -453,32 +399,32 @@ CHART_CODE_SYSTEM = (
     "Return ONLY executable Python matplotlib code. "
     "No markdown fences, no explanations, no import statements, no plt.show(), no plt.savefig(). "
     "DataFrame `df` is already loaded with lowercase column names. "
-    "Do NOT redefine df."
+    "Do NOT redefine df. "
+    "ALL data values are PRECOMPUTED — do NOT perform any arithmetic "
+    "(no dividing by 1e9, no multiplying by 100, no unit conversions). "
+    "Plot the columns exactly as provided. Do NOT reorder rows."
 )
 
 CHART_DEFINITIONS = {
     "price_sma": {
         "title": "Price & Moving Averages",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a basic matplotlib chart for {ticker} stock price. "
-            f"df has columns: date (datetime), close, sma_7d, sma_30d, sma_90d. "
-            f"Plot close price as a line. figsize=(12,5). "
-            f"Title: '{ticker} Stock Price'. x-axis: date, rotate 45 degrees."
+            f"Generate a professional matplotlib chart for {ticker} stock price.\n"
+            f"df columns: date (datetime), close, sma_7d, sma_30d, sma_90d.\n"
+            f"All values are in USD. Data is pre-sorted by date ascending.\n"
+            f"Plot close as filled area (#2563eb alpha=0.15) with line, "
+            f"sma_7d (#f59e0b dashed), sma_30d (#10b981 dashed), sma_90d (#ef4444 dashed).\n"
+            f"ax.set_facecolor('#f8f9fa'), gridlines (#e0e0e0), legend upper left, "
+            f"title fontsize=14 bold, axis labels fontsize=11, figsize=(14,6).\n"
+            f"Y-axis must zoom around min/max price (not start at 0).\n"
+            f"X-ticks rotate 30deg."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} chart. Previous code:\n{code}\n\n"
+            f"Improve this {ticker} price chart based on critique.\nPrevious code:\n{code}\n\n"
             f"Critique:\n{critique}\n\n"
-            f"Add: sma_7d (orange dashed), sma_30d (green dashed), sma_90d (red dashed), "
-            f"gridlines (alpha=0.3), legend, axis labels 'Price (USD)' and 'Date'."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create a PROFESSIONAL publication-ready {ticker} price chart. Previous:\n{code}\n\n"
-            f"Critique:\n{critique}\n\n"
-            f"Requirements: close as filled area (#2563eb alpha=0.15) with line, "
-            f"sma_7d (#f59e0b dashed), sma_30d (#10b981 dashed), sma_90d (#ef4444 dashed), "
-            f"ax.set_facecolor('#f8f9fa'), gridlines (#e0e0e0), "
-            f"title fontsize=14 bold, axis labels fontsize=11, "
-            f"legend upper left framealpha=0.9, x-ticks rotate 30deg, figsize=(14,6)."
+            f"Data is pre-sorted. All values in USD. Do NOT reorder or transform data.\n"
+            f"Fix the issues mentioned while keeping: filled area under close, "
+            f"all 4 SMAs, professional styling, legend, gridlines."
         ),
         "fallback_code": """
 import matplotlib.dates as mdates
@@ -502,7 +448,6 @@ ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
 ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=2))
 ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
 plt.xticks(rotation=45, ha='right', fontsize=9)
-# Tighten y-axis around price range (avoid large empty space below)
 price_min = float(df['close'].min())
 price_max = float(df['close'].max())
 padding = (price_max - price_min) * 0.1
@@ -513,25 +458,19 @@ ax.set_ylim(price_min - padding, price_max + padding)
     "volatility": {
         "title": "Volume & 30-Day Volatility",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a basic matplotlib chart for {ticker} volume. "
-            f"df has columns: date (datetime), volume, volatility_30d_pct. "
-            f"Plot volume as bar chart. figsize=(12,5). Title: '{ticker} Volume'."
+            f"Generate a professional dual-axis chart for {ticker} volume and volatility.\n"
+            f"df columns: date (datetime), volume_millions (ALREADY in millions), "
+            f"volatility_30d_pct (ALREADY in %).\n"
+            f"Data is pre-sorted by date ascending. Do NOT divide volume or multiply volatility.\n"
+            f"Left axis: volume bars (#94a3b8 alpha=0.6). Right axis: volatility line (#ef4444).\n"
+            f"ax.set_facecolor('#f8f9fa'), combined legend, title fontsize=14 bold, figsize=(14,6).\n"
+            f"Use FuncFormatter: left 'X.0fM', right 'X.1f%'. No scientific notation."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} volume chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Add: volatility_30d_pct as line on right axis (twinx), "
-            f"axis labels, legend, gridlines."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} volume/volatility chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: volume bars (#94a3b8 alpha=0.6) on left axis, "
-            f"volatility_30d_pct line (#ef4444 linewidth=2) on right axis, "
-            f"ax.set_facecolor('#f8f9fa'), gridlines, both axes labeled, "
-            f"title fontsize=14 bold, combined legend, figsize=(14,6). "
-            f"MUST show dual axes: left=Volume in Millions (divide raw volume by 1e6), "
-            f"right=Volatility %. MUST NOT use scientific notation. "
-            f"MUST show both bar chart (volume) and line chart (volatility) on same figure. "
-            f"Use FuncFormatter to format left y-axis as 'Xm' and right y-axis as 'X.X%'."
+            f"Improve this {ticker} volume/volatility chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"volume_millions is ALREADY in millions. volatility_30d_pct is ALREADY in %.\n"
+            f"Do NOT divide or multiply any values. Fix the critique issues."
         ),
         "fallback_code": """
 from matplotlib.ticker import MaxNLocator, FuncFormatter
@@ -540,16 +479,14 @@ ax1.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 df['date'] = pd.to_datetime(df['date'])
 ax2 = ax1.twinx()
-vol_m = df['volume'] / 1e6
-ax1.bar(df['date'], vol_m, color='#94a3b8', alpha=0.6, width=1.5, label='Volume (M)')
+ax1.bar(df['date'], df['volume_millions'], color='#94a3b8', alpha=0.6, width=1.5, label='Volume (M)')
 if df['volatility_30d_pct'].notna().any():
     ax2.plot(df['date'], df['volatility_30d_pct'], color='#ef476f', linewidth=2, label='Volatility 30D %')
 ax1.set_title('Volume & 30-Day Volatility', fontsize=14, fontweight='bold')
 ax1.set_xlabel('Date', fontsize=11)
 ax1.set_ylabel('Volume (Millions)', fontsize=11)
 ax2.set_ylabel('Volatility 30D %', fontsize=11)
-# Explicit y-limits + formatters (no scientific notation)
-ax1.set_ylim(0, float(vol_m.max()) * 1.15)
+ax1.set_ylim(0, float(df['volume_millions'].max()) * 1.15)
 ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:.0f}M'))
 vol_series = df['volatility_30d_pct'].dropna()
 if not vol_series.empty:
@@ -566,43 +503,29 @@ plt.setp(ax1.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=9)
     },
 
     "revenue_growth": {
-        "title": "Revenue & Net Income Growth",
+        "title": "Revenue & Net Income Growth (YoY %)",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a grouped bar chart for {ticker} YoY growth. "
-            f"df has columns: fiscal_quarter, revenue_growth_yoy_pct, net_income_growth_yoy_pct. "
-            f"Plot revenue_growth_yoy_pct and net_income_growth_yoy_pct as grouped bars. "
-            f"DO NOT use any _qoq_ columns. DO NOT use a secondary axis. figsize=(12,5). "
-            f"Title: 'Revenue & Net Income Growth (YoY %)'. "
-            f"y-axis label: 'Growth (YoY %)'. x-axis: fiscal_quarter."
+            f"Generate a professional grouped bar chart for {ticker} YoY growth.\n"
+            f"df columns: fiscal_quarter, revenue_growth_yoy_pct, net_income_growth_yoy_pct.\n"
+            f"Values are ALREADY in percent. Do NOT multiply by 100. Data is pre-sorted.\n"
+            f"Grouped bars: revenue (#00b4d8), net_income (#06d6a0), negative bars in #ef476f.\n"
+            f"Zero reference line, data labels on bars, ax.set_facecolor('#f8f9fa'),\n"
+            f"title fontsize=14 bold, figsize=(14,6). y-axis: 'Growth (YoY %)'.\n"
+            f"Do NOT add a secondary y-axis. Do NOT plot absolute values."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} YoY growth chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Keep using revenue_growth_yoy_pct and net_income_growth_yoy_pct ONLY. "
-            f"Add: color coding (green=#06d6a0 positive, red=#ef476f negative), legend, axis labels. "
-            f"DO NOT switch to QoQ columns. DO NOT add a secondary y-axis."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} revenue/income growth chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: grouped bars ONLY (revenue_growth=#00b4d8, net_income_growth=#06d6a0), "
-            f"color bars #ef476f if negative, zero reference line, "
-            f"ax.set_facecolor('#f8f9fa'), data labels on top of each bar showing the %, "
-            f"title fontsize=14 bold, figsize=(14,6). "
-            f"MUST plot revenue_growth_yoy_pct and net_income_growth_yoy_pct (NOT the QoQ columns). "
-            f"Title MUST be 'Revenue & Net Income Growth (YoY %)'. y-axis label MUST be 'Growth (YoY %)'. "
-            f"MUST show only percentage values on single y-axis. "
-            f"MUST NOT plot absolute revenue values. MUST NOT use a secondary y-axis. "
-            f"MUST NOT use scientific notation. Use FormatStrFormatter('%.1f%%') on y-axis."
+            f"Improve this {ticker} growth chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Values are ALREADY in percent. Do NOT multiply or transform.\n"
+            f"Keep using revenue_growth_yoy_pct and net_income_growth_yoy_pct ONLY."
         ),
         "fallback_code": """
 from matplotlib.ticker import FormatStrFormatter
 fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
-
-# Always use YoY growth
 growth_col = 'revenue_growth_yoy_pct'
 ni_col = 'net_income_growth_yoy_pct'
-
 x = list(range(len(df)))
 width = 0.35
 rev_vals = df[growth_col].fillna(0)
@@ -614,8 +537,6 @@ bars1 = ax.bar([i - width/2 for i in x], rev_vals, width, color=rev_colors, alph
 bars2 = ax.bar([i + width/2 for i in x], ni_vals, width, color=inc_colors, alpha=0.85,
                label='Net Income Growth YoY %')
 ax.axhline(y=0, color='black', linewidth=0.8, linestyle='-')
-
-# Data labels on top of bars
 for bar, v in zip(bars1, rev_vals):
     ax.annotate(f'{v:.1f}%', (bar.get_x() + bar.get_width()/2, v),
                 textcoords='offset points', xytext=(0, 4 if v >= 0 else -12),
@@ -624,7 +545,6 @@ for bar, v in zip(bars2, ni_vals):
     ax.annotate(f'{v:.1f}%', (bar.get_x() + bar.get_width()/2, v),
                 textcoords='offset points', xytext=(0, 4 if v >= 0 else -12),
                 ha='center', fontsize=8, color='#0f172a')
-
 ax.set_xticks(x)
 ax.set_xticklabels(df['fiscal_quarter'].tolist(), rotation=30, fontsize=9, ha='right')
 ax.set_title('Revenue & Net Income Growth (YoY %)', fontsize=14, fontweight='bold')
@@ -638,21 +558,18 @@ ax.legend(fontsize=9, framealpha=0.9, loc='upper left')
     "eps_trend": {
         "title": "EPS Trend",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a basic line chart for {ticker} EPS. "
-            f"df has columns: fiscal_quarter, eps, eps_growth_yoy_pct. "
-            f"Plot eps as a line. figsize=(12,5). Title: '{ticker} EPS Trend'."
+            f"Generate a professional dual-axis chart for {ticker} EPS trend.\n"
+            f"df columns: fiscal_quarter, eps (USD), eps_growth_yoy_pct (ALREADY in %).\n"
+            f"Data is pre-sorted chronologically. Do NOT transform values.\n"
+            f"EPS line (#2563eb linewidth=2.5 circle markers) on left axis.\n"
+            f"eps_growth_yoy_pct bars (green/red by sign, alpha=0.4) on right axis.\n"
+            f"Data labels on EPS points, ax.set_facecolor('#f8f9fa'), "
+            f"title fontsize=14 bold, figsize=(14,6)."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} EPS chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Add: eps_growth_yoy_pct as bars on right axis (twinx), "
-            f"data point markers on EPS line, axis labels, legend."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} EPS trend chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: eps line (#2563eb linewidth=2.5 with circle markers), "
-            f"eps_growth_yoy_pct bars (#10b981/#ef4444 based on sign) on right axis, "
-            f"data labels on EPS points, ax.set_facecolor('#f8f9fa'), "
-            f"title fontsize=14 bold, figsize=(14,6)."
+            f"Improve this {ticker} EPS chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"EPS in USD, growth ALREADY in %. Do NOT transform. Fix the critique issues."
         ),
         "fallback_code": """
 fig, ax1 = plt.subplots(figsize=(14, 6))
@@ -684,34 +601,23 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
     "sentiment": {
         "title": "News Sentiment Trend",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a basic line chart for {ticker} sentiment. "
-            f"df has columns: news_date (datetime), sentiment_score, sentiment_score_7d_avg. "
-            f"Plot sentiment_score as a line. figsize=(12,5). Title: '{ticker} News Sentiment'."
+            f"Generate a professional sentiment chart for {ticker}.\n"
+            f"df columns: news_date (datetime), sentiment_score, sentiment_score_7d_avg.\n"
+            f"Scores are ALREADY in range -1 to +1. Data is pre-sorted by date.\n"
+            f"fill_between positive (#10b981 alpha=0.2), negative (#ef4444 alpha=0.2),\n"
+            f"7d avg line (#2563eb linewidth=2), zero reference line (black dashed),\n"
+            f"y-axis -1 to 1, ax.set_facecolor('#f8f9fa'), title fontsize=14 bold, figsize=(14,6)."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} sentiment chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Add: sentiment_score_7d_avg as smoother line, "
-            f"zero reference line, color positive area green and negative red, "
-            f"axis labels, legend."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} sentiment chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: fill_between positive sentiment (#10b981 alpha=0.2), "
-            f"fill_between negative sentiment (#ef4444 alpha=0.2), "
-            f"sentiment_score_7d_avg line (#2563eb linewidth=2), "
-            f"zero reference line (black dashed), ax.set_facecolor('#f8f9fa'), "
-            f"y-axis range -1 to 1, title fontsize=14 bold, figsize=(14,6). "
-            f"MUST show dates from 2025-2026 only. If x-axis shows 1969 or 1970, "
-            f"timestamps are in milliseconds — use pd.to_datetime(df['news_date'], unit='ms'). "
-            f"MUST filter to last 60 days: cutoff = pd.Timestamp.now() - pd.Timedelta(days=60); "
-            f"df = df[df['news_date'] >= cutoff]."
+            f"Improve this {ticker} sentiment chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Scores ALREADY in -1 to +1. Do NOT scale. Fix the critique issues."
         ),
         "fallback_code": """
 from matplotlib.ticker import MaxNLocator
 fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
-# Robust date parsing — guard against epoch (seconds or ms) stored as int/float
 if df['news_date'].dtype in ('int64', 'float64'):
     if df['news_date'].mean() > 1e10:
         df['news_date'] = pd.to_datetime(df['news_date'], unit='ms')
@@ -719,7 +625,6 @@ if df['news_date'].dtype in ('int64', 'float64'):
         df['news_date'] = pd.to_datetime(df['news_date'], unit='s')
 else:
     df['news_date'] = pd.to_datetime(df['news_date'])
-# Filter to last 60 days relative to now
 cutoff = pd.Timestamp.now() - pd.Timedelta(days=60)
 df = df[df['news_date'] >= cutoff].sort_values('news_date').reset_index(drop=True)
 ax.fill_between(df['news_date'], 0, df['sentiment_score_7d_avg'].fillna(0),
@@ -748,29 +653,25 @@ plt.xticks(rotation=30, ha='right', fontsize=9)
     "financial_health": {
         "title": "SEC Financial Health Snapshot",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a basic bar chart for {ticker} financial margins. "
-            f"df has columns: fiscal_year, fiscal_period, net_margin_pct, operating_margin_pct. "
-            f"Plot net_margin_pct as bars. figsize=(12,5). Title: '{ticker} Financial Health'."
+            f"Generate a professional financial health chart for {ticker}.\n"
+            f"df columns: fiscal_period, net_margin_pct (ALREADY in %), "
+            f"operating_margin_pct (ALREADY in %), debt_to_equity_ratio (ratio).\n"
+            f"Data is pre-sorted chronologically. Do NOT multiply or transform values.\n"
+            f"Grouped bars: net_margin_pct (#00b4d8), operating_margin_pct (#06d6a0).\n"
+            f"debt_to_equity_ratio line (#ef4444) on right axis.\n"
+            f"Value labels on bars, ax.set_facecolor('#f8f9fa'), "
+            f"combined legend, title fontsize=14 bold, figsize=(14,6)."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} financial health chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Add: operating_margin_pct as second grouped bar, "
-            f"debt_to_equity_ratio as line on right axis, axis labels, legend."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} financial health chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: net_margin_pct bars (#2563eb), operating_margin_pct bars (#10b981), "
-            f"debt_to_equity_ratio line (#ef4444) on right axis, "
-            f"period labels as 'YYYY FP' on x-axis, "
-            f"ax.set_facecolor('#f8f9fa'), value labels on bars, "
-            f"title fontsize=14 bold, figsize=(14,6)."
+            f"Improve this {ticker} financial health chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Margins ALREADY in %. Debt/equity ALREADY a ratio. Do NOT transform."
         ),
         "fallback_code": """
 fig, ax1 = plt.subplots(figsize=(14, 6))
 ax1.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 ax2 = ax1.twinx()
-# Use fiscal_period directly — it already contains the year (e.g. "Q4 2025")
 labels = df['fiscal_period'].tolist()
 x = range(len(df))
 width = 0.35
@@ -783,7 +684,6 @@ if df['debt_to_equity_ratio'].notna().any():
     ax2.plot(list(x), df['debt_to_equity_ratio'].fillna(0),
              color='#ef476f', linewidth=2, marker='D', markersize=6,
              label='Debt/Equity Ratio')
-# Add value labels on margin bars
 for i, v in enumerate(df['net_margin_pct'].fillna(0)):
     if v != 0:
         ax1.annotate(f'{v:.1f}%', (i - width/2, v), textcoords='offset points',
@@ -803,24 +703,19 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
     "margin_trend": {
         "title": "Profitability Margin Trend",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a line chart for {ticker} margin trends. "
-            f"df has columns: fiscal_period, net_margin, operating_margin (as decimals 0-1). "
-            f"Multiply by 100 to show as percentages. Plot both as lines. "
-            f"figsize=(12,5). Title: '{ticker} Margin Trend'."
+            f"Generate a professional margin trend chart for {ticker}.\n"
+            f"df columns: fiscal_period, net_margin_pct (ALREADY in %), "
+            f"operating_margin_pct (ALREADY in %).\n"
+            f"Data is pre-sorted chronologically. Do NOT multiply by 100.\n"
+            f"Net margin: filled area (#00b4d8 alpha=0.15) + line (#00b4d8 linewidth=2, marker='o').\n"
+            f"Operating margin: dashed line (#06d6a0 linewidth=2, marker='s').\n"
+            f"Value labels on points, ax.set_facecolor('#f8f9fa'), "
+            f"title fontsize=14 bold, figsize=(14,6). y-axis: 'Margin %'."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} margin trend chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Add: area fill under net_margin line, markers on data points, "
-            f"gridlines, y-axis label as 'Margin %', legend."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} margin trend chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: net_margin*100 as filled area (#00b4d8 alpha=0.15) with solid line (#00b4d8 linewidth=2), "
-            f"operating_margin*100 as line (#06d6a0 linewidth=2 dashed), "
-            f"markers (o, s) on data points, ax.set_facecolor('#f8f9fa'), "
-            f"value labels on each point, gridlines, title fontsize=14 bold, figsize=(14,6). "
-            f"x-axis: fiscal_period labels. y-axis: 'Margin %'. "
-            f"Handle NaN gracefully with .fillna(method='ffill')."
+            f"Improve this {ticker} margin trend chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"Margins ALREADY in %. Do NOT multiply by 100. Fix the critique issues."
         ),
         "fallback_code": """
 fig, ax = plt.subplots(figsize=(14, 6))
@@ -828,8 +723,8 @@ ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 labels = df['fiscal_period'].tolist()
 x = range(len(df))
-net_m = df['net_margin'].fillna(0) * 100
-op_m = df['operating_margin'].fillna(0) * 100
+net_m = df['net_margin_pct'].fillna(0)
+op_m = df['operating_margin_pct'].fillna(0)
 ax.fill_between(list(x), 0, net_m, alpha=0.15, color='#00b4d8')
 ax.plot(list(x), net_m, color='#00b4d8', linewidth=2, marker='o', markersize=6, label='Net Margin %')
 ax.plot(list(x), op_m, color='#06d6a0', linewidth=2, marker='s', markersize=6, linestyle='--', label='Operating Margin %')
@@ -851,24 +746,20 @@ ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
     "balance_sheet": {
         "title": "Balance Sheet Composition",
         "iter1_prompt": lambda ticker, df: (
-            f"Generate a stacked bar chart for {ticker} balance sheet. "
-            f"df has columns: fiscal_period, total_assets, total_liabilities, stockholders_equity. "
-            f"Values are large numbers — divide by 1e9 to show in billions. "
-            f"figsize=(12,5). Title: '{ticker} Balance Sheet'."
+            f"Generate a professional balance sheet chart for {ticker}.\n"
+            f"df columns: fiscal_period, total_assets_billions, total_liabilities_billions, "
+            f"stockholders_equity_billions.\n"
+            f"ALL values are ALREADY in billions ($B). Do NOT divide by 1e9.\n"
+            f"Data is pre-sorted chronologically.\n"
+            f"Stacked bars: liabilities (#ef476f alpha=0.7) bottom, equity (#06d6a0 alpha=0.7) top.\n"
+            f"Total assets line overlay (#00b4d8 linewidth=2, marker='D').\n"
+            f"Data labels on assets line, ax.set_facecolor('#f8f9fa'), "
+            f"y-axis: 'Amount ($B)', title fontsize=14 bold, figsize=(14,6)."
         ),
         "iter2_prompt": lambda ticker, df, code, critique: (
-            f"Improve this {ticker} balance sheet chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Show liabilities and equity as stacked bars (should sum to ~total_assets). "
-            f"Add total_assets as a line overlay, axis labels in $B, legend."
-        ),
-        "iter3_prompt": lambda ticker, df, code, critique: (
-            f"Create PROFESSIONAL {ticker} balance sheet chart. Previous:\n{code}\n\nCritique:\n{critique}\n\n"
-            f"Requirements: stacked bars with total_liabilities (#ef476f alpha=0.7) on bottom "
-            f"and stockholders_equity (#06d6a0 alpha=0.7) stacked on top, "
-            f"total_assets as line (#00b4d8 linewidth=2, marker='D'), "
-            f"all values divided by 1e9 (show as $B), ax.set_facecolor('#f8f9fa'), "
-            f"y-axis: 'Amount ($B)', x-axis: fiscal_period labels, "
-            f"title fontsize=14 bold, figsize=(14,6), gridlines."
+            f"Improve this {ticker} balance sheet chart based on critique.\n"
+            f"Previous code:\n{code}\n\nCritique:\n{critique}\n\n"
+            f"ALL values ALREADY in billions. Do NOT divide by 1e9. Fix the critique issues."
         ),
         "fallback_code": """
 fig, ax = plt.subplots(figsize=(14, 6))
@@ -876,9 +767,9 @@ ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 labels = df['fiscal_period'].tolist()
 x = range(len(df))
-liab_b = df['total_liabilities'].fillna(0) / 1e9
-eq_b = df['stockholders_equity'].fillna(0) / 1e9
-assets_b = df['total_assets'].fillna(0) / 1e9
+liab_b = df['total_liabilities_billions'].fillna(0)
+eq_b = df['stockholders_equity_billions'].fillna(0)
+assets_b = df['total_assets_billions'].fillna(0)
 ax.bar(list(x), liab_b, color='#ef476f', alpha=0.7, label='Total Liabilities')
 ax.bar(list(x), eq_b, bottom=liab_b, color='#06d6a0', alpha=0.7, label="Stockholders' Equity")
 ax.plot(list(x), assets_b, color='#00b4d8', linewidth=2, marker='D', markersize=7, label='Total Assets')
@@ -989,20 +880,14 @@ def generate_single_chart(
     data_summary: dict = None,
 ) -> dict:
     """
-    Generate one chart through up to 3 LLM+VLM refinement iterations.
+    Generate one chart through exactly FIXED_REFINEMENT_ITERATIONS (2) LLM+VLM
+    refinement iterations. Deterministic — no budget-based or score-based
+    early stopping.
 
-    After each iteration the chart PNG is uploaded to a Snowflake stage and
-    critiqued by the VLM via true multimodal COMPLETE (TO_FILE).
+    Iteration 1: Generate professional chart from spec-driven prompt.
+    Iteration 2: Refine based on VLM critique of iteration 1.
 
-    - If the VLM score >= 7 (ACCEPT), the chart is kept immediately.
-    - If the score < MIN_ACCEPTABLE_SCORE after an iteration, the chart is
-      regenerated in the next iteration.
-    - After 3 iterations (or budget exhaustion), the best-scoring version is kept.
-    - Falls back to hardcoded professional chart if all iterations fail.
-
-    Args:
-        debug: If True, saves all iteration PNGs.
-        data_summary: Pre-computed chart metrics for VLM critique enrichment.
+    Falls back to hardcoded professional chart if both iterations fail.
 
     Returns a ChartResult dict.
     """
@@ -1012,11 +897,14 @@ def generate_single_chart(
 
     logger.info("Generating chart: %s", chart_id)
 
-    # Hard constraints injected into every regen prompt
+    # Hard constraints injected into every prompt
     cols_list = ", ".join(df.columns.tolist())
+    spec_constraints = get_constraint_text(chart_id)
     hard_constraints = (
+        f"{spec_constraints}\n\n"
         "HARD CONSTRAINTS:\n"
         f"- Use only columns that exist in df: [{cols_list}]\n"
+        "- ALL data values are PRECOMPUTED — do NOT perform any arithmetic.\n"
         "- Modules pd, np, plt, mdates are already imported — do NOT re-import.\n"
         "- DO NOT call plt.savefig or plt.show — the runner handles saving.\n"
         "- DO NOT call ax.ticklabel_format or set_scientific (breaks date/category axes).\n"
@@ -1025,25 +913,19 @@ def generate_single_chart(
         "- For price charts: set ax.set_ylim to zoom around min/max (not starting at 0)."
     )
 
-    chart_start = time.time()
-
-    def budget_left():
-        return PER_CHART_BUDGET_SEC - (time.time() - chart_start)
-
-    # Map iteration number -> prompt key in CHART_DEFINITIONS
-    iter_prompt_keys = {1: "iter1_prompt", 2: "iter2_prompt", 3: "iter3_prompt"}
+    iter_prompt_keys = {1: "iter1_prompt", 2: "iter2_prompt"}
 
     try:
         import shutil as _shutil
-        best_score = -1.0
         best_path = None
         prev_code = None
         prev_critique = None
         refinement_count = 0
 
-        for iteration in range(1, MAX_REFINEMENT_ITERATIONS + 1):
+        for iteration in range(1, FIXED_REFINEMENT_ITERATIONS + 1):
             iter_tag = f"iter{iteration}"
-            logger.info("Chart %s: starting %s", chart_id, iter_tag)
+            logger.info("Chart %s: starting %s (of %d fixed)",
+                        chart_id, iter_tag, FIXED_REFINEMENT_ITERATIONS)
 
             # ── Build prompt ──────────────────────────────────
             prompt_key = iter_prompt_keys[iteration]
@@ -1058,15 +940,14 @@ def generate_single_chart(
                     f"VLM SCORE: {prev_critique['score']}/10\n"
                     f"ISSUES: {prev_critique['issues']}\n"
                     f"IMPROVEMENTS: {prev_critique['improvements']}"
-                )
+                ) if prev_critique else "No critique available."
                 prompt = (
                     f"{CHART_CODE_SYSTEM}\n\n"
                     f"{defn[prompt_key](ticker, df, prev_code, feedback)}\n\n"
                     f"{hard_constraints}"
                 )
                 # On final iteration, include fallback code as reference
-                if iteration == MAX_REFINEMENT_ITERATIONS:
-                    prompt += f"\n\nReference working fallback:\n{defn['fallback_code'][:800]}"
+                prompt += f"\n\nReference working fallback:\n{defn['fallback_code'][:800]}"
 
             # ── Generate code ─────────────────────────────────
             code = cortex_complete_with_timeout(session, prompt)
@@ -1080,74 +961,35 @@ def generate_single_chart(
             if not execute_chart_code(code, df, iter_path):
                 logger.warning("Chart %s: %s render failed", chart_id, iter_tag)
                 if best_path:
-                    # Keep previous best
                     continue
                 else:
                     raise RuntimeError(f"Iteration {iteration} render failed (no prior version)")
 
-            # Update best so far if this is the first successful render
-            if best_path is None:
-                _shutil.copyfile(iter_path, final_path)
-                best_path = final_path
-                best_score = 0.0
-
+            # Keep latest successful render
+            _shutil.copyfile(iter_path, final_path)
+            best_path = final_path
             refinement_count = iteration
             prev_code = code
 
-            # ── Budget check before critique ──────────────────
-            if budget_left() < 30:
-                logger.warning("Chart %s: budget exhausted after %s (%.1fs left)",
-                               chart_id, iter_tag, budget_left())
-                # Keep the latest successful render
-                _shutil.copyfile(iter_path, final_path)
-                logger.info("Chart %s accepted at %s (budget)", chart_id, iter_tag)
-                return _make_chart_result(chart_id, title, final_path, refinement_count, df)
-
-            # ── VLM critique (multimodal — image is uploaded to stage) ──
-            crit_text = vision_critique_with_timeout(
-                session, iter_path, CRITIQUE_PROMPT, data_summary
-            )
-            if crit_text is None:
-                logger.info("VLM critique %s %s: TIMEOUT — keeping current", chart_id, iter_tag)
-                _shutil.copyfile(iter_path, final_path)
-                return _make_chart_result(chart_id, title, final_path, refinement_count, df)
-
-            crit = parse_vlm_critique(crit_text)
-            prev_critique = crit
-            logger.info(
-                "VLM critique %s %s: score=%.1f accept=%s",
-                chart_id, iter_tag, crit["score"],
-                "YES" if crit["accept"] else "NO"
-            )
-
-            # Track best version by score
-            if crit["score"] > best_score:
-                best_score = crit["score"]
-                best_path = iter_path
-                _shutil.copyfile(iter_path, final_path)
-
-            # ── Accept if score is good enough ────────────────
-            if crit["accept"]:
-                logger.info("Chart %s accepted at %s (score %.1f)",
-                            chart_id, iter_tag, crit["score"])
-                return _make_chart_result(chart_id, title, final_path, refinement_count, df)
-
-            # ── Score below threshold: force regeneration ─────
-            if crit["score"] < MIN_ACCEPTABLE_SCORE:
-                logger.warning(
-                    "Chart %s %s: score %.1f < %.1f threshold — will regenerate",
-                    chart_id, iter_tag, crit["score"], MIN_ACCEPTABLE_SCORE
+            # ── VLM critique (skip on final iteration — no more refinements) ──
+            if iteration < FIXED_REFINEMENT_ITERATIONS:
+                crit_text = vision_critique_with_timeout(
+                    session, iter_path, CRITIQUE_PROMPT, data_summary
                 )
+                if crit_text is not None:
+                    prev_critique = parse_vlm_critique(crit_text)
+                    logger.info(
+                        "VLM critique %s %s: score=%.1f",
+                        chart_id, iter_tag, prev_critique["score"],
+                    )
+                else:
+                    logger.info("VLM critique %s %s: TIMEOUT — proceeding to next iteration",
+                                chart_id, iter_tag)
+                    prev_critique = None
 
-            # ── Budget check before next iteration ────────────
-            if budget_left() < 60:
-                logger.warning("Chart %s: skipping further iterations, budget %.1fs left",
-                               chart_id, budget_left())
-                break
-
-        # Loop exhausted — use best version
-        logger.info("Chart %s: all %d iterations done, best score=%.1f",
-                    chart_id, refinement_count, best_score)
+        # All fixed iterations done
+        logger.info("Chart %s: completed %d deterministic iterations",
+                    chart_id, refinement_count)
 
     except Exception as e:
         logger.warning(
@@ -1182,16 +1024,23 @@ def generate_charts(
     debug: bool = False
 ) -> list:
     """
-    Generate all 6 charts for the given ticker.
+    Generate all 8 charts for the given ticker with deterministic ordering.
+
+    Pipeline:
+        1. Fetch raw data from ANALYTICS layer
+        2. Run data through chart_data_prep (precompute all values)
+        3. Generate charts in parallel (ThreadPoolExecutor)
+        4. Re-sort results by CANONICAL_CHART_ORDER (deterministic)
+        5. Save manifest
 
     Args:
         session:    Snowflake session
         ticker:     Stock ticker symbol
         output_dir: Directory to save charts (created if not exists)
-        debug:      If True, saves all 3 iteration PNGs per chart
+        debug:      If True, saves all iteration PNGs per chart
 
     Returns:
-        List of ChartResult dicts (contract for orchestrator)
+        List of ChartResult dicts in CANONICAL order (contract for orchestrator)
     """
     ticker = ticker.upper()
 
@@ -1203,20 +1052,20 @@ def generate_charts(
     out.mkdir(parents=True, exist_ok=True)
 
     if debug:
-        logger.info("🐛 DEBUG MODE ON — all 3 iteration charts will be saved")
+        logger.info("DEBUG MODE ON — all iteration charts will be saved")
 
-    logger.info("═" * 50)
-    logger.info("Chart Agent starting for %s → %s", ticker, out)
-    logger.info("═" * 50)
+    logger.info("=" * 50)
+    logger.info("Chart Agent starting for %s -> %s", ticker, out)
+    logger.info("=" * 50)
 
-    # Fetch all data upfront
+    # ── 1. Fetch all raw data upfront ─────────────────────────
     logger.info("Fetching data from ANALYTICS layer...")
     stock_df = fetch_stock_metrics(session, ticker)
     fund_df = fetch_fundamentals_growth(session, ticker)
     news_df = fetch_news_sentiment(session, ticker)
     sec_df = fetch_sec_financial_summary(session, ticker)
 
-    # Map chart_id → (dataframe, data_summary_builder)
+    # Map chart_id -> (raw_dataframe, data_summary_builder)
     chart_data_map = {
         "price_sma":        (stock_df, build_price_summary),
         "volatility":       (stock_df, build_volatility_summary),
@@ -1234,36 +1083,94 @@ def generate_charts(
         "balance_sheet": 3,
     }
 
-    results = []
-    for chart_id, (df, summary_fn) in chart_data_map.items():
-        if df.empty:
+    # ── 2. Precompute chart-ready data via data prep layer ────
+    chart_tasks = []
+    for chart_id, (raw_df, summary_fn) in chart_data_map.items():
+        if raw_df.empty:
             logger.warning("No data for chart '%s', skipping", chart_id)
             continue
 
         min_rows = MIN_ROWS.get(chart_id, 1)
-        if len(df) < min_rows:
+        if len(raw_df) < min_rows:
             logger.warning(
                 "Insufficient data for chart '%s' (%d rows, need %d), skipping",
-                chart_id, len(df), min_rows,
+                chart_id, len(raw_df), min_rows,
             )
             continue
 
-        # Compute data_summary BEFORE chart generation so VLM critique has context
-        data_summary = summary_fn(df)
+        # Run through deterministic data preparation
+        prep_fn = PREPARE_FUNCTIONS.get(chart_id)
+        if prep_fn is not None:
+            prepped = prep_fn(raw_df)
 
-        chart_result = generate_single_chart(
-            session, chart_id, ticker, df, out, debug=debug,
-            data_summary=data_summary,
-        )
-        chart_result["data_summary"] = data_summary
-        results.append(chart_result)
+            # ── Pre-render validation ─────────────────────────
+            try:
+                warnings = validate_chart_data(chart_id, prepped)
+                if warnings:
+                    logger.info("Chart '%s' validation warnings: %s", chart_id, warnings)
+            except ChartDataValidationError as e:
+                logger.error("Chart '%s' failed pre-render validation: %s", chart_id, e)
+                continue
+
+            # Convert precomputed dict back to DataFrame for chart execution
+            # (the execute_chart_code function writes df to CSV)
+            prep_df = pd.DataFrame(prepped)
+        else:
+            prep_df = raw_df.copy()
+
+        data_summary = summary_fn(raw_df)
+        chart_tasks.append((chart_id, prep_df, data_summary))
+
+    # ── 3. Generate charts in parallel ────────────────────────
+    MAX_CHART_WORKERS = min(4, len(chart_tasks)) if chart_tasks else 1
+    logger.info(
+        "Generating %d charts in parallel (max_workers=%d)",
+        len(chart_tasks), MAX_CHART_WORKERS,
+    )
+
+    def _generate_one(task_tuple):
+        cid, cdf, csummary = task_tuple
+        worker_session = get_session()
+        try:
+            chart_result = generate_single_chart(
+                worker_session, cid, ticker, cdf, out, debug=debug,
+                data_summary=csummary,
+            )
+            chart_result["data_summary"] = csummary
+            return chart_result
+        finally:
+            try:
+                worker_session.close()
+            except Exception:
+                pass
+
+    # Collect results into dict keyed by chart_id (order-independent)
+    results_by_id = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CHART_WORKERS) as executor:
+        futures = {
+            executor.submit(_generate_one, task): task[0]
+            for task in chart_tasks
+        }
+        for future in concurrent.futures.as_completed(futures):
+            chart_id = futures[future]
+            try:
+                result = future.result()
+                results_by_id[chart_id] = result
+            except Exception:
+                logger.exception("Chart '%s' failed in parallel generation", chart_id)
+
+    # ── 4. Restore canonical ordering ─────────────────────────
+    results = []
+    for chart_id in CANONICAL_CHART_ORDER:
+        if chart_id in results_by_id:
+            results.append(results_by_id[chart_id])
 
     logger.info(
-        "Chart Agent complete: %d/%d charts generated",
+        "Chart Agent complete: %d/%d charts generated (canonical order)",
         len(results), len(chart_data_map)
     )
 
-    # Save manifest
+    # ── 5. Save manifest ──────────────────────────────────────
     manifest_path = out / "chart_manifest.json"
     with open(manifest_path, "w") as f:
         json.dump(
@@ -1278,7 +1185,10 @@ def regenerate_single_chart(
     session, ticker: str, chart_id: str,
     output_dir: str, debug: bool = False,
 ) -> dict:
-    """Re-run chart generation for one chart_id (used by orchestrator retry loop)."""
+    """Re-run chart generation for one chart_id (used by orchestrator retry loop).
+
+    Uses the data preparation layer for deterministic precomputed values.
+    """
     ticker = ticker.upper()
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -1297,13 +1207,30 @@ def regenerate_single_chart(
         raise ValueError(f"Unknown chart_id: {chart_id}")
 
     fetch_fn, summary_fn = data_fetchers[chart_id]
-    df = fetch_fn(session, ticker)
-    if df.empty:
+    raw_df = fetch_fn(session, ticker)
+    if raw_df.empty:
         raise RuntimeError(f"No data available for chart '{chart_id}'")
 
-    data_summary = summary_fn(df)
+    # Run through deterministic data preparation
+    prep_fn = PREPARE_FUNCTIONS.get(chart_id)
+    if prep_fn is not None:
+        prepped = prep_fn(raw_df)
+
+        # Pre-render validation
+        try:
+            warnings = validate_chart_data(chart_id, prepped)
+            if warnings:
+                logger.info("Regen chart '%s' validation warnings: %s", chart_id, warnings)
+        except ChartDataValidationError as e:
+            raise RuntimeError(f"Chart '{chart_id}' failed pre-render validation: {e}") from e
+
+        prep_df = pd.DataFrame(prepped)
+    else:
+        prep_df = raw_df.copy()
+
+    data_summary = summary_fn(raw_df)
     chart_result = generate_single_chart(
-        session, chart_id, ticker, df, out, debug=debug,
+        session, chart_id, ticker, prep_df, out, debug=debug,
         data_summary=data_summary,
     )
     chart_result["data_summary"] = data_summary
@@ -1325,7 +1252,7 @@ if __name__ == "__main__":
     parser.add_argument("--ticker", default="AAPL", help="Stock ticker (default: AAPL)")
     parser.add_argument(
         "--debug", action="store_true",
-        help="Save all 3 iteration charts per chart + print VLM critiques to logs"
+        help="Save all iteration charts per chart + print VLM critiques to logs"
     )
     args = parser.parse_args()
 
