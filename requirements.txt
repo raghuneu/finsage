@@ -27,10 +27,11 @@ matplotlib>=3.8.0
 reportlab>=4.1.0
 Pillow>=10.0.0
 
-# Frontend
-streamlit>=1.32.0
-plotly>=5.18.0
+# Logging
 colorlog>=6.8.0
+
+# Frontend: see frontend-react/package.json (React/Next.js)
+#           and frontend-react/api/requirements.txt (FastAPI backend)
 
 # Testing
 pytest>=8.0.0

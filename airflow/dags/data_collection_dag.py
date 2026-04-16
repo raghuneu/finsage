@@ -79,11 +79,16 @@ def _run_in_batches(tickers: list, loader, delay_key: str = 'default', **load_kw
 
     Returns list of (ticker, success_bool) tuples.
     """
+    total = len(tickers)
     delay = BATCH_DELAYS.get(delay_key, BATCH_DELAYS['default'])
     results = []
-    for i in range(0, len(tickers), BATCH_SIZE):
+    for i in range(0, total, BATCH_SIZE):
+        batch_num = i // BATCH_SIZE + 1
+        total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
         batch = tickers[i:i + BATCH_SIZE]
-        for ticker in batch:
+        for j, ticker in enumerate(batch):
+            idx = i + j + 1
+            print(f"[{idx}/{total}] (batch {batch_num}/{total_batches}) >>> {ticker}")
             try:
                 loader.load(ticker, **load_kwargs)
                 results.append((ticker, True))
@@ -91,11 +96,11 @@ def _run_in_batches(tickers: list, loader, delay_key: str = 'default', **load_kw
                 print(f"WARNING: {ticker} failed: {e}")
                 results.append((ticker, False))
         # Delay between batches (skip after last batch)
-        if i + BATCH_SIZE < len(tickers):
-            print(f"Batch {i // BATCH_SIZE + 1} complete — sleeping {delay}s for rate limits")
+        if i + BATCH_SIZE < total:
+            print(f"Batch {batch_num}/{total_batches} complete — sleeping {delay}s for rate limits")
             time.sleep(delay)
     succeeded = sum(1 for _, ok in results if ok)
-    print(f"Finished: {succeeded}/{len(results)} tickers succeeded")
+    print(f"Finished: {succeeded}/{total} tickers succeeded")
     return results
 
 

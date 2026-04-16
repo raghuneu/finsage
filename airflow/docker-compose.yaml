@@ -161,7 +161,8 @@ services:
 
   airflow-worker:
     <<: *airflow-common
-    command: celery worker
+    hostname: airflow-worker
+    command: celery worker -H airflow-worker
     healthcheck:
       # yamllint disable rule:line-length
       test:
