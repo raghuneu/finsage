@@ -80,7 +80,7 @@ python scripts/sec_filings/multi_model.py
 
 `agents/orchestrator.py` coordinates four agents in sequence:
 
-1. **Chart Agent** (`chart_agent.py`) — Queries ANALYTICS layer, generates 6 matplotlib charts per ticker, uses 3-iteration VLM refinement loop (Snowflake Cortex pixtral-large: initial → critique → refined → final)
+1. **Chart Agent** (`chart_agent.py`) — Queries ANALYTICS layer, generates 6 matplotlib charts per ticker, uses 3-iteration VLM refinement loop (Snowflake Cortex claude-sonnet-4-6: initial → critique → refined → final)
 2. **Validation Agent** (`validation_agent.py`) — Validates chart visual quality and data integrity, flags failures for re-generation
 3. **Analysis Agent** (`analysis_agent.py`) — Per-chart LLM analysis via Snowflake Cortex (mistral-large), plus SEC MD&A/Risk Factors summarization via Cortex SUMMARIZE
 4. **Report Agent** (`report_agent.py`) — Assembles branded PDF with reportlab (Midnight Teal color scheme: #0f2027 header, #00b4d8 accent, #06d6a0 bullish, #ef476f bearish)
@@ -140,7 +140,7 @@ Scheduled daily at 5 PM EST. Tasks: 4 parallel data fetches → `run_dbt_transfo
 ## Tech Stack
 
 - **Python 3.9** with virtual environment (`venv/`)
-- **Snowflake** (SFEDU02 academic account) — warehouse, Cortex LLM/VLM (pixtral-large, mistral-large), Cortex Search, Cortex SUMMARIZE
+- **Snowflake** (SFEDU02 academic account) — warehouse, Cortex LLM/VLM (claude-sonnet-4-6, mistral-large), Cortex Search, Cortex SUMMARIZE
 - **AWS Bedrock** — Knowledge Base RAG (Llama 3), Guardrails (content safety/grounding), multi-model inference (Llama3, Titan, Mistral, Claude)
 - **AWS S3** — SEC filing document storage (`finsage-sec-filings-808683`)
 - **dbt 1.7** for SQL transformations

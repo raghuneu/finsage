@@ -50,10 +50,11 @@ _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(mess
 logger.addHandler(_fh)
 
 CORTEX_MODEL_LLM = os.getenv("CORTEX_MODEL_LLM", "claude-opus-4-6")
-CORTEX_MODEL_VLM = os.getenv("CORTEX_MODEL_VLM", "openai-gpt-5.2")
-MAX_REFINEMENT_ITERATIONS = 2
+CORTEX_MODEL_VLM = os.getenv("CORTEX_MODEL_VLM", "claude-sonnet-4-6")
+MAX_REFINEMENT_ITERATIONS = 3
+MIN_ACCEPTABLE_SCORE = 6.0
 VLM_CALL_TIMEOUT_SEC = 120
-PER_CHART_BUDGET_SEC = 180
+PER_CHART_BUDGET_SEC = 300
 
 PROJECT_ROOT = Path(__file__).parent.parent
 OUTPUT_BASE = PROJECT_ROOT / "outputs"
@@ -91,13 +92,13 @@ def _fiscal_quarter_sort_key(q: str) -> tuple:
 def fetch_fundamentals_growth(session, ticker: str) -> pd.DataFrame:
     df = session.sql(f"""
         SELECT FISCAL_QUARTER, REVENUE, NET_INCOME, EPS,
-               REVENUE_GROWTH_YOY AS REVENUE_GROWTH_YOY_PCT,
-               NET_INCOME_GROWTH_YOY AS NET_INCOME_GROWTH_YOY_PCT,
-               EPS_GROWTH_YOY AS EPS_GROWTH_YOY_PCT,
-               EPS_GROWTH_QOQ AS EPS_GROWTH_QOQ_PCT,
-               REVENUE_GROWTH_QOQ AS REVENUE_GROWTH_QOQ_PCT,
-               NET_INCOME_GROWTH_QOQ AS NET_INCOME_GROWTH_QOQ_PCT,
-               NET_MARGIN,
+               REVENUE_GROWTH_YOY_PCT,
+               NET_INCOME_GROWTH_YOY_PCT,
+               EPS_GROWTH_YOY_PCT,
+               EPS_GROWTH_QOQ_PCT,
+               REVENUE_GROWTH_QOQ_PCT,
+               NET_INCOME_GROWTH_QOQ_PCT,
+               NET_MARGIN_PCT AS NET_MARGIN,
                FUNDAMENTAL_SIGNAL
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER = '{ticker.upper()}'
@@ -112,11 +113,11 @@ def fetch_fundamentals_growth(session, ticker: str) -> pd.DataFrame:
 def fetch_news_sentiment(session, ticker: str) -> pd.DataFrame:
     df = session.sql(f"""
         SELECT NEWS_DATE,
-               AVG_SENTIMENT_SCORE AS SENTIMENT_SCORE,
-               ROLLING_SENTIMENT_7D AS SENTIMENT_SCORE_7D_AVG,
-               ARTICLE_COUNT AS TOTAL_ARTICLES,
+               SENTIMENT_SCORE,
+               SENTIMENT_SCORE_7D_AVG,
+               TOTAL_ARTICLES,
                SENTIMENT_LABEL, SENTIMENT_TREND,
-               VOLUME_MOMENTUM AS NEWS_VOLUME_MOMENTUM
+               NEWS_VOLUME_MOMENTUM
         FROM ANALYTICS.FCT_NEWS_SENTIMENT_AGG
         WHERE TICKER = '{ticker.upper()}'
           AND NEWS_DATE >= DATEADD('day', -60, CURRENT_DATE)
@@ -137,7 +138,7 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
     """
     # Primary: fundamentals table (has real NET_MARGIN)
     fund_df = session.sql(f"""
-        SELECT FISCAL_QUARTER, REVENUE, NET_MARGIN, NET_INCOME
+        SELECT FISCAL_QUARTER, REVENUE, NET_MARGIN_PCT AS NET_MARGIN, NET_INCOME
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER = '{ticker.upper()}'
         ORDER BY FISCAL_QUARTER
@@ -147,8 +148,8 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
     # SEC table for debt/equity and operating income
     sec_df = session.sql(f"""
         SELECT FISCAL_YEAR, FISCAL_PERIOD,
-               DEBT_TO_EQUITY AS DEBT_TO_EQUITY_RATIO,
-               ROE AS RETURN_ON_EQUITY_PCT,
+               DEBT_TO_EQUITY_RATIO,
+               RETURN_ON_EQUITY_PCT,
                OPERATING_INCOME,
                FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
@@ -988,11 +989,19 @@ def generate_single_chart(
     data_summary: dict = None,
 ) -> dict:
     """
-    Generate one chart through 3 LLM+VLM refinement iterations.
-    Falls back to hardcoded professional chart if any iteration fails.
+    Generate one chart through up to 3 LLM+VLM refinement iterations.
+
+    After each iteration the chart PNG is uploaded to a Snowflake stage and
+    critiqued by the VLM via true multimodal COMPLETE (TO_FILE).
+
+    - If the VLM score >= 7 (ACCEPT), the chart is kept immediately.
+    - If the score < MIN_ACCEPTABLE_SCORE after an iteration, the chart is
+      regenerated in the next iteration.
+    - After 3 iterations (or budget exhaustion), the best-scoring version is kept.
+    - Falls back to hardcoded professional chart if all iterations fail.
 
     Args:
-        debug: If True, saves all 3 iteration PNGs and prints critiques to logs.
+        debug: If True, saves all iteration PNGs.
         data_summary: Pre-computed chart metrics for VLM critique enrichment.
 
     Returns a ChartResult dict.
@@ -1021,86 +1030,124 @@ def generate_single_chart(
     def budget_left():
         return PER_CHART_BUDGET_SEC - (time.time() - chart_start)
 
+    # Map iteration number -> prompt key in CHART_DEFINITIONS
+    iter_prompt_keys = {1: "iter1_prompt", 2: "iter2_prompt", 3: "iter3_prompt"}
+
     try:
-        # ── Iteration 1 ──────────────────────────────────────
-        prompt1 = f"{CHART_CODE_SYSTEM}\n\n{defn['iter1_prompt'](ticker, df)}\n\n{hard_constraints}"
-        code1 = cortex_complete_with_timeout(session, prompt1)
-        if code1 is None:
-            raise RuntimeError("Iteration 1 LLM timed out")
-
-        path1 = str(output_dir / f"{chart_id}_iter1.png") if debug \
-            else str(output_dir / f"{chart_id}_iter1_tmp.png")
-
-        if not execute_chart_code(code1, df, path1):
-            raise RuntimeError("Iteration 1 render failed")
-
-        # First draft becomes the accepted chart unless iter2 improves on it
         import shutil as _shutil
-        _shutil.copyfile(path1, final_path)
-        refinement_count = 1
+        best_score = -1.0
+        best_path = None
+        prev_code = None
+        prev_critique = None
+        refinement_count = 0
 
-        # Budget check
-        if budget_left() < 30:
-            logger.warning("Chart %s: budget exhausted after iter1 (%.1fs left)", chart_id, budget_left())
-            logger.info("✅ Chart %s accepted at iter1 (budget)", chart_id)
-            return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+        for iteration in range(1, MAX_REFINEMENT_ITERATIONS + 1):
+            iter_tag = f"iter{iteration}"
+            logger.info("Chart %s: starting %s", chart_id, iter_tag)
 
-        # ── Critique 1 (structured, with timeout) ────────────
-        crit1_text = vision_critique_with_timeout(session, path1, CRITIQUE_PROMPT, data_summary)
-        if crit1_text is None:
-            logger.info("VLM critique %s iter1: TIMEOUT — treating as ACCEPT", chart_id)
-            return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+            # ── Build prompt ──────────────────────────────────
+            prompt_key = iter_prompt_keys[iteration]
+            if iteration == 1:
+                prompt = (
+                    f"{CHART_CODE_SYSTEM}\n\n"
+                    f"{defn[prompt_key](ticker, df)}\n\n"
+                    f"{hard_constraints}"
+                )
+            else:
+                feedback = (
+                    f"VLM SCORE: {prev_critique['score']}/10\n"
+                    f"ISSUES: {prev_critique['issues']}\n"
+                    f"IMPROVEMENTS: {prev_critique['improvements']}"
+                )
+                prompt = (
+                    f"{CHART_CODE_SYSTEM}\n\n"
+                    f"{defn[prompt_key](ticker, df, prev_code, feedback)}\n\n"
+                    f"{hard_constraints}"
+                )
+                # On final iteration, include fallback code as reference
+                if iteration == MAX_REFINEMENT_ITERATIONS:
+                    prompt += f"\n\nReference working fallback:\n{defn['fallback_code'][:800]}"
 
-        crit1 = parse_vlm_critique(crit1_text)
-        logger.info(
-            "VLM critique %s iter1: score=%.1f accept=%s",
-            chart_id, crit1["score"], "YES" if crit1["accept"] else "NO"
-        )
-        if crit1["accept"]:
-            logger.info("✅ Chart %s accepted at iter1 (score %.1f)", chart_id, crit1["score"])
-            return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+            # ── Generate code ─────────────────────────────────
+            code = cortex_complete_with_timeout(session, prompt)
+            if code is None:
+                raise RuntimeError(f"Iteration {iteration} LLM timed out")
 
-        # Budget check before iter2
-        if budget_left() < 60:
-            logger.warning("Chart %s: skipping iter2, budget %.1fs left", chart_id, budget_left())
-            return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+            iter_path = str(output_dir / f"{chart_id}_{iter_tag}.png") if debug \
+                else str(output_dir / f"{chart_id}_{iter_tag}_tmp.png")
 
-        # ── Iteration 2 (final under max_iterations=2) ───────
-        feedback2 = (
-            f"VLM SCORE: {crit1['score']}/10\n"
-            f"ISSUES: {crit1['issues']}\n"
-            f"IMPROVEMENTS: {crit1['improvements']}"
-        )
-        prompt2 = (
-            f"{CHART_CODE_SYSTEM}\n\n"
-            f"{defn['iter3_prompt'](ticker, df, code1, feedback2)}\n\n"
-            f"{hard_constraints}\n\n"
-            f"Reference working fallback:\n{defn['fallback_code'][:800]}"
-        )
-        code2 = cortex_complete_with_timeout(session, prompt2)
-        if code2 is None:
-            raise RuntimeError("Iteration 2 LLM timed out")
+            # ── Render chart ──────────────────────────────────
+            if not execute_chart_code(code, df, iter_path):
+                logger.warning("Chart %s: %s render failed", chart_id, iter_tag)
+                if best_path:
+                    # Keep previous best
+                    continue
+                else:
+                    raise RuntimeError(f"Iteration {iteration} render failed (no prior version)")
 
-        if not execute_chart_code(code2, df, final_path):
-            # Keep iter1 output
-            logger.warning("Chart %s: iter2 render failed — keeping iter1", chart_id)
-            return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+            # Update best so far if this is the first successful render
+            if best_path is None:
+                _shutil.copyfile(iter_path, final_path)
+                best_path = final_path
+                best_score = 0.0
 
-        refinement_count = 2
+            refinement_count = iteration
+            prev_code = code
 
-        # Final critique for observability
-        crit2_text = vision_critique_with_timeout(session, final_path, CRITIQUE_PROMPT, data_summary)
-        if crit2_text:
-            crit2 = parse_vlm_critique(crit2_text)
-            logger.info(
-                "VLM critique %s iter2: score=%.1f accept=%s",
-                chart_id, crit2["score"], "YES" if crit2["accept"] else "NO"
+            # ── Budget check before critique ──────────────────
+            if budget_left() < 30:
+                logger.warning("Chart %s: budget exhausted after %s (%.1fs left)",
+                               chart_id, iter_tag, budget_left())
+                # Keep the latest successful render
+                _shutil.copyfile(iter_path, final_path)
+                logger.info("Chart %s accepted at %s (budget)", chart_id, iter_tag)
+                return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+
+            # ── VLM critique (multimodal — image is uploaded to stage) ──
+            crit_text = vision_critique_with_timeout(
+                session, iter_path, CRITIQUE_PROMPT, data_summary
             )
-        else:
-            logger.info("VLM critique %s iter2: TIMEOUT", chart_id)
+            if crit_text is None:
+                logger.info("VLM critique %s %s: TIMEOUT — keeping current", chart_id, iter_tag)
+                _shutil.copyfile(iter_path, final_path)
+                return _make_chart_result(chart_id, title, final_path, refinement_count, df)
 
-        logger.info("✅ Chart generated via LLM+VLM refinement: %s (%d iterations)",
-                    chart_id, refinement_count)
+            crit = parse_vlm_critique(crit_text)
+            prev_critique = crit
+            logger.info(
+                "VLM critique %s %s: score=%.1f accept=%s",
+                chart_id, iter_tag, crit["score"],
+                "YES" if crit["accept"] else "NO"
+            )
+
+            # Track best version by score
+            if crit["score"] > best_score:
+                best_score = crit["score"]
+                best_path = iter_path
+                _shutil.copyfile(iter_path, final_path)
+
+            # ── Accept if score is good enough ────────────────
+            if crit["accept"]:
+                logger.info("Chart %s accepted at %s (score %.1f)",
+                            chart_id, iter_tag, crit["score"])
+                return _make_chart_result(chart_id, title, final_path, refinement_count, df)
+
+            # ── Score below threshold: force regeneration ─────
+            if crit["score"] < MIN_ACCEPTABLE_SCORE:
+                logger.warning(
+                    "Chart %s %s: score %.1f < %.1f threshold — will regenerate",
+                    chart_id, iter_tag, crit["score"], MIN_ACCEPTABLE_SCORE
+                )
+
+            # ── Budget check before next iteration ────────────
+            if budget_left() < 60:
+                logger.warning("Chart %s: skipping further iterations, budget %.1fs left",
+                               chart_id, budget_left())
+                break
+
+        # Loop exhausted — use best version
+        logger.info("Chart %s: all %d iterations done, best score=%.1f",
+                    chart_id, refinement_count, best_score)
 
     except Exception as e:
         logger.warning(
@@ -1111,7 +1158,7 @@ def generate_single_chart(
         if not success:
             logger.error("Fallback chart also failed for %s", chart_id)
         else:
-            logger.info("✅ Fallback chart rendered for %s", chart_id)
+            logger.info("Fallback chart rendered for %s", chart_id)
         refinement_count = 0
 
     return {
