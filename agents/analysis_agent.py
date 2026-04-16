@@ -673,8 +673,9 @@ def synthesize_analyses(session: Session, analyses: list, ticker: str) -> str:
 # Company Overview (called by orchestrator)
 # ──────────────────────────────────────────────────────────────
 
-# Peer group mapping for comparison analysis
-PEER_GROUPS = {
+# In-memory peer-group cache, seeded with well-known tickers.
+# resolve_peers() populates this dynamically for unknown tickers.
+_PEER_CACHE = {
     "AAPL":  ["MSFT", "GOOGL", "AMZN"],
     "MSFT":  ["AAPL", "GOOGL", "AMZN"],
     "GOOGL": ["AAPL", "MSFT", "META"],
@@ -686,6 +687,58 @@ PEER_GROUPS = {
     "BAC":   ["JPM", "GS", "C"],
     "GS":    ["JPM", "MS", "BAC"],
 }
+
+# Sector-level fallback peers when yfinance lookup fails
+_SECTOR_DEFAULTS = {
+    "Technology":        ["AAPL", "MSFT", "GOOGL"],
+    "Communication Services": ["GOOGL", "META", "NFLX"],
+    "Consumer Cyclical": ["AMZN", "TSLA", "HD"],
+    "Financial Services": ["JPM", "BAC", "GS"],
+    "Healthcare":        ["JNJ", "UNH", "PFE"],
+    "Consumer Defensive": ["PG", "KO", "PEP"],
+    "Industrials":       ["CAT", "HON", "UNP"],
+    "Energy":            ["XOM", "CVX", "COP"],
+    "Utilities":         ["NEE", "DUK", "SO"],
+    "Real Estate":       ["AMT", "PLD", "CCI"],
+    "Basic Materials":   ["LIN", "APD", "ECL"],
+}
+
+
+def resolve_peers(ticker: str, max_peers: int = 3) -> list[str]:
+    """Resolve peer tickers for comparison analysis.
+
+    Resolution order:
+        1. In-memory cache
+        2. yfinance sector/industry lookup → find peers in same sector
+        3. Sector-level default peers
+        4. Generic large-cap fallback
+    """
+    ticker = ticker.upper().strip()
+
+    # Method 1: cache
+    if ticker in _PEER_CACHE:
+        return _PEER_CACHE[ticker][:max_peers]
+
+    # Method 2: yfinance sector lookup
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+        sector = info.get("sector", "")
+
+        if sector and sector in _SECTOR_DEFAULTS:
+            peers = [p for p in _SECTOR_DEFAULTS[sector] if p != ticker][:max_peers]
+            if peers:
+                _PEER_CACHE[ticker] = peers
+                logger.info("Resolved peers for %s via sector '%s': %s", ticker, sector, peers)
+                return peers
+    except Exception as exc:
+        logger.debug("yfinance peer lookup failed for %s: %s", ticker, exc)
+
+    # Method 3: generic large-cap fallback
+    fallback = [p for p in ["AAPL", "MSFT", "GOOGL"] if p != ticker][:max_peers]
+    _PEER_CACHE[ticker] = fallback
+    logger.info("Using fallback peers for %s: %s", ticker, fallback)
+    return fallback
 
 
 def _query_company_facts(session: Session, ticker: str) -> dict:
@@ -792,7 +845,7 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
         description = _validate_with_guardrails(description, label="company_overview")
 
     # Competitive landscape via Cortex
-    peers = PEER_GROUPS.get(ticker, [])
+    peers = resolve_peers(ticker)
     peer_str = ", ".join(peers[:4]) if peers else "major industry peers"
     comp_prompt = (
         f"Write a concise 3-4 sentence competitive landscape analysis for {ticker} "
@@ -865,7 +918,7 @@ def generate_peer_comparison(session: Session, ticker: str) -> dict:
     """
     logger.info("Generating peer comparison for %s", ticker)
     safe_ticker = ticker.upper().strip()
-    peer_tickers = PEER_GROUPS.get(safe_ticker, [])
+    peer_tickers = resolve_peers(safe_ticker)
 
     if not peer_tickers:
         logger.warning("No peer group defined for %s", ticker)
@@ -1128,7 +1181,7 @@ def generate_valuation_analysis(session: Session, ticker: str) -> dict:
     """
     logger.info("Generating valuation analysis for %s", ticker)
 
-    peers = PEER_GROUPS.get(ticker, ["AAPL", "MSFT", "GOOGL"])
+    peers = resolve_peers(ticker)
     all_tickers = [ticker] + [p for p in peers if p != ticker]
     ticker_list = ", ".join(f"'{t}'" for t in all_tickers)
 

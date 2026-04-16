@@ -54,16 +54,82 @@ HEADERS = {
 # SEC rate limit: max 10 requests per second
 SEC_REQUEST_DELAY = 0.12  # ~8 req/sec to stay safe
 
-# Company mapping: ticker → CIK (zero-padded to 10 digits)
-COMPANY_MAP = {
+# In-memory CIK cache, seeded with well-known tickers.
+# resolve_cik() populates this dynamically for unknown tickers.
+_CIK_CACHE = {
     "AAPL":  "0000320193",
     "TSLA":  "0001318605",
     "MSFT":  "0000789019",
     "JPM":   "0000019617",
     "GOOGL": "0001652044",
+    "AMZN":  "0001018724",
+    "NVDA":  "0001045810",
+    "META":  "0001326801",
 }
 
 SUPPORTED_FORM_TYPES = ["10-K", "10-Q"]
+
+
+# ──────────────────────────────────────────────────────────────
+# Dynamic CIK resolution (mirrors sec_loader.py cascade)
+# ──────────────────────────────────────────────────────────────
+def resolve_cik(ticker: str) -> str | None:
+    """Resolve a ticker symbol to a zero-padded 10-digit CIK.
+
+    Resolution order:
+        1. In-memory cache (_CIK_CACHE)
+        2. SEC ``company_tickers.json`` bulk endpoint
+        3. SEC EDGAR full-text search
+        4. Return None if all methods fail
+
+    Successfully resolved CIKs are cached in ``_CIK_CACHE`` for the
+    lifetime of the process.
+    """
+    ticker = ticker.upper().strip()
+
+    # Method 1: cache hit
+    if ticker in _CIK_CACHE:
+        logger.debug("CIK cache hit for %s: %s", ticker, _CIK_CACHE[ticker])
+        return _CIK_CACHE[ticker]
+
+    # Method 2: SEC bulk JSON (contains every public filer)
+    try:
+        url = "https://www.sec.gov/files/company_tickers.json"
+        time.sleep(SEC_REQUEST_DELAY)
+        resp = httpx.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            for item in data.values():
+                t = item["ticker"].upper()
+                c = str(item["cik_str"]).zfill(10)
+                _CIK_CACHE[t] = c
+
+            if ticker in _CIK_CACHE:
+                logger.info("Resolved CIK for %s via company_tickers.json: %s",
+                            ticker, _CIK_CACHE[ticker])
+                return _CIK_CACHE[ticker]
+    except Exception as exc:
+        logger.warning("company_tickers.json lookup failed: %s", exc)
+
+    # Method 3: EDGAR full-text search
+    try:
+        search_url = "https://efts.sec.gov/LATEST/search-index?q=%22{}%22&dateRange=custom&startdt=2020-01-01&forms=10-K".format(ticker)
+        time.sleep(SEC_REQUEST_DELAY)
+        resp = httpx.get(search_url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            hits = resp.json().get("hits", {}).get("hits", [])
+            if hits:
+                cik_raw = hits[0].get("_source", {}).get("entity_id", "")
+                if cik_raw:
+                    cik = str(cik_raw).zfill(10)
+                    _CIK_CACHE[ticker] = cik
+                    logger.info("Resolved CIK for %s via EDGAR search: %s", ticker, cik)
+                    return cik
+    except Exception as exc:
+        logger.warning("EDGAR search lookup failed: %s", exc)
+
+    logger.error("Could not resolve CIK for ticker %s", ticker)
+    return None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -213,9 +279,9 @@ def download_filings_for_ticker(ticker: str, form_type: str,
 
     Returns summary dict with counts.
     """
-    cik = COMPANY_MAP.get(ticker.upper())
+    cik = resolve_cik(ticker)
     if not cik:
-        logger.error("Ticker %s not found in COMPANY_MAP", ticker)
+        logger.error("Could not resolve CIK for ticker %s", ticker)
         return {"ticker": ticker, "error": "unknown_ticker"}
 
     # Step 1: Get filing index from EDGAR
@@ -318,7 +384,7 @@ def download_all_filings(tickers: list = None, form_types: list = None,
     Saves a manifest to S3 when complete.
     """
     if tickers is None:
-        tickers = list(COMPANY_MAP.keys())
+        tickers = list(_CIK_CACHE.keys())
     if form_types is None:
         form_types = SUPPORTED_FORM_TYPES
 
