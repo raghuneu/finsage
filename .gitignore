@@ -17,4 +17,4 @@ ignoreFiles/
 outputs/
 
 # Claude Code local settings (not shared)
-.claude/settings.local.json
+.claude/settings.local.json.claude/

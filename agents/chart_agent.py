@@ -92,13 +92,13 @@ def _fiscal_quarter_sort_key(q: str) -> tuple:
 def fetch_fundamentals_growth(session, ticker: str) -> pd.DataFrame:
     df = session.sql(f"""
         SELECT FISCAL_QUARTER, REVENUE, NET_INCOME, EPS,
-               REVENUE_GROWTH_YOY AS REVENUE_GROWTH_YOY_PCT,
-               NET_INCOME_GROWTH_YOY AS NET_INCOME_GROWTH_YOY_PCT,
-               EPS_GROWTH_YOY AS EPS_GROWTH_YOY_PCT,
-               EPS_GROWTH_QOQ AS EPS_GROWTH_QOQ_PCT,
-               REVENUE_GROWTH_QOQ AS REVENUE_GROWTH_QOQ_PCT,
-               NET_INCOME_GROWTH_QOQ AS NET_INCOME_GROWTH_QOQ_PCT,
-               NET_MARGIN,
+               REVENUE_GROWTH_YOY_PCT,
+               NET_INCOME_GROWTH_YOY_PCT,
+               EPS_GROWTH_YOY_PCT,
+               EPS_GROWTH_QOQ_PCT,
+               REVENUE_GROWTH_QOQ_PCT,
+               NET_INCOME_GROWTH_QOQ_PCT,
+               NET_MARGIN_PCT AS NET_MARGIN,
                FUNDAMENTAL_SIGNAL
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER = '{ticker.upper()}'
@@ -113,11 +113,11 @@ def fetch_fundamentals_growth(session, ticker: str) -> pd.DataFrame:
 def fetch_news_sentiment(session, ticker: str) -> pd.DataFrame:
     df = session.sql(f"""
         SELECT NEWS_DATE,
-               AVG_SENTIMENT_SCORE AS SENTIMENT_SCORE,
-               ROLLING_SENTIMENT_7D AS SENTIMENT_SCORE_7D_AVG,
-               ARTICLE_COUNT AS TOTAL_ARTICLES,
+               SENTIMENT_SCORE,
+               SENTIMENT_SCORE_7D_AVG,
+               TOTAL_ARTICLES,
                SENTIMENT_LABEL, SENTIMENT_TREND,
-               VOLUME_MOMENTUM AS NEWS_VOLUME_MOMENTUM
+               NEWS_VOLUME_MOMENTUM
         FROM ANALYTICS.FCT_NEWS_SENTIMENT_AGG
         WHERE TICKER = '{ticker.upper()}'
           AND NEWS_DATE >= DATEADD('day', -60, CURRENT_DATE)
@@ -138,7 +138,7 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
     """
     # Primary: fundamentals table (has real NET_MARGIN)
     fund_df = session.sql(f"""
-        SELECT FISCAL_QUARTER, REVENUE, NET_MARGIN, NET_INCOME
+        SELECT FISCAL_QUARTER, REVENUE, NET_MARGIN_PCT AS NET_MARGIN, NET_INCOME
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
         WHERE TICKER = '{ticker.upper()}'
         ORDER BY FISCAL_QUARTER
@@ -148,8 +148,8 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
     # SEC table for debt/equity and operating income
     sec_df = session.sql(f"""
         SELECT FISCAL_YEAR, FISCAL_PERIOD,
-               DEBT_TO_EQUITY AS DEBT_TO_EQUITY_RATIO,
-               ROE AS RETURN_ON_EQUITY_PCT,
+               DEBT_TO_EQUITY_RATIO,
+               RETURN_ON_EQUITY_PCT,
                OPERATING_INCOME,
                FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
