@@ -225,40 +225,39 @@ export default function SECFilingPage() {
             color: '#2C2A25',
           }}
         >
-          Document-level analysis requires extracted filing text (RAW_SEC_FILING_DOCUMENTS).
-          Only XBRL financial data is available.
+          <strong>Analytics-Only Mode:</strong> No extracted filing text found. Analysis will use
+          quantitative data from the analytics pipeline. Run the SEC extraction pipeline to enable
+          full text-based analysis.
         </Alert>
       )}
 
-      {isDocSource && (
-        <Card sx={{ p: 2, mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Select
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              size="small"
-              sx={{ minWidth: 200 }}
-            >
-              {ANALYSIS_MODES.map((m) => (
-                <MenuItem key={m.value} value={m.value}>
-                  {m.label}
-                </MenuItem>
-              ))}
-            </Select>
-            <Typography variant="body2" sx={{ color: '#6B6760', fontSize: '0.8rem', flex: 1 }}>
-              {modeInfo?.desc}
-            </Typography>
-            <Button
-              variant="contained"
-              onClick={runAnalysis}
-              disabled={analyzing}
-              startIcon={analyzing ? <CircularProgress size={16} /> : <PlayArrowIcon />}
-            >
-              {analyzing ? 'Analyzing...' : 'Run Analysis'}
-            </Button>
-          </Box>
-        </Card>
-      )}
+      <Card sx={{ p: 2, mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            size="small"
+            sx={{ minWidth: 200 }}
+          >
+            {ANALYSIS_MODES.map((m) => (
+              <MenuItem key={m.value} value={m.value}>
+                {m.label}
+              </MenuItem>
+            ))}
+          </Select>
+          <Typography variant="body2" sx={{ color: '#6B6760', fontSize: '0.8rem', flex: 1 }}>
+            {modeInfo?.desc}
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={runAnalysis}
+            disabled={analyzing}
+            startIcon={analyzing ? <CircularProgress size={16} /> : <PlayArrowIcon />}
+          >
+            {analyzing ? 'Analyzing...' : 'Run Analysis'}
+          </Button>
+        </Box>
+      </Card>
 
       {analysisError && (
         <Alert severity="error" sx={{ mb: 2 }}>

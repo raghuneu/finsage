@@ -576,22 +576,30 @@ def summarize_sec_filings(session: Session, ticker: str) -> dict:
     if sec_text["mda_text"]:
         logger.info("Summarizing MD&A text (%d chars)", len(sec_text["mda_text"]))
         mda_summary = _cortex_summarize(session, sec_text["mda_text"])
-        if mda_summary:
+        if mda_summary and len(mda_summary) >= 100:
             mda_summary = _validate_with_guardrails(mda_summary, label="mda_summary")
             logger.info("MD&A summary generated (%d chars)", len(mda_summary))
         else:
-            logger.warning("Cortex returned empty MD&A summary for %s", ticker)
+            logger.warning(
+                "MD&A summary too short or empty for %s (%d chars), discarding",
+                ticker, len(mda_summary or ""),
+            )
+            mda_summary = ""
     else:
         logger.warning("No extracted MD&A text found for %s", ticker)
 
     if sec_text["risk_text"]:
         logger.info("Summarizing Risk Factors text (%d chars)", len(sec_text["risk_text"]))
         risk_summary = _cortex_summarize(session, sec_text["risk_text"])
-        if risk_summary:
+        if risk_summary and len(risk_summary) >= 100:
             risk_summary = _validate_with_guardrails(risk_summary, label="risk_summary")
             logger.info("Risk summary generated (%d chars)", len(risk_summary))
         else:
-            logger.warning("Cortex returned empty risk summary for %s", ticker)
+            logger.warning(
+                "Risk summary too short or empty for %s (%d chars), discarding",
+                ticker, len(risk_summary or ""),
+            )
+            risk_summary = ""
     else:
         logger.warning("No extracted Risk Factors text found for %s", ticker)
 
@@ -1005,39 +1013,59 @@ def generate_peer_comparison(session: Session, ticker: str) -> dict:
             return f"${v/1e9:.0f}B"
         return f"${v/1e6:.0f}M"
 
-    comparison_lines = []
-    for p in peers_data:
-        mc = _fmt_mc(p.get("market_cap"))
-        pe = f"{p['pe_ratio']:.1f}" if p.get("pe_ratio") else "N/A"
-        margin = p.get("net_margin") or p.get("profit_margin")
-        m_str = f"{float(margin)*100:.1f}%" if margin and float(margin) < 1 else (
-            f"{float(margin):.1f}%" if margin else "N/A"
-        )
-        eps = f"${p['eps']:.2f}" if p.get("eps") else "N/A"
-        comparison_lines.append(
-            f"{p['ticker']}: Market Cap {mc}, P/E {pe}, Net Margin {m_str}, EPS {eps}"
-        )
+    # Check if we have any actual peers (not just the target ticker)
+    actual_peers = [p for p in peers_data if p["ticker"] != safe_ticker]
 
-    prompt = (
-        f"You are a senior equity research analyst writing a peer comparison section. "
-        f"Compare {safe_ticker} against its peer group and write a concise 3-4 sentence "
-        f"comparative analysis. Highlight relative strengths and weaknesses in valuation, "
-        f"profitability, and scale. Be specific with numbers.\n\n"
-        f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
-        f"Write in third person, professional tone. Do not use bullet points."
-    )
-
-    summary = _cortex_complete(session, prompt)
-    if not summary:
-        summary = f"Peer comparison summary not available for {ticker}."
+    if not actual_peers:
+        logger.warning(
+            "No peer data available for %s — all peers excluded: %s",
+            safe_ticker, excluded_peers,
+        )
+        summary = (
+            f"Peer comparison is not available for {safe_ticker}. "
+            f"Peer tickers ({', '.join(excluded_peers)}) are not currently tracked "
+            f"in the data warehouse. Add them to the tracked tickers list and run "
+            f"the data pipeline to enable peer comparison analysis."
+        )
     else:
-        summary = _validate_with_guardrails(summary, label="peer_comparison")
+        comparison_lines = []
+        for p in peers_data:
+            mc = _fmt_mc(p.get("market_cap"))
+            pe = f"{p['pe_ratio']:.1f}" if p.get("pe_ratio") else "N/A"
+            margin = p.get("net_margin") or p.get("profit_margin")
+            m_str = f"{float(margin)*100:.1f}%" if margin and float(margin) < 1 else (
+                f"{float(margin):.1f}%" if margin else "N/A"
+            )
+            eps = f"${p['eps']:.2f}" if p.get("eps") else "N/A"
+            comparison_lines.append(
+                f"{p['ticker']}: Market Cap {mc}, P/E {pe}, Net Margin {m_str}, EPS {eps}"
+            )
+
+        prompt = (
+            f"You are a senior equity research analyst writing a peer comparison section. "
+            f"Compare {safe_ticker} against its peer group and write a concise 3-4 sentence "
+            f"comparative analysis. Highlight relative strengths and weaknesses in valuation, "
+            f"profitability, and scale. Be specific with numbers.\n\n"
+            f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
+            f"Write in third person, professional tone. Do not use bullet points."
+        )
+
+        summary = _cortex_complete(session, prompt)
+        if not summary:
+            summary = f"Peer comparison summary not available for {ticker}."
+        else:
+            summary = _validate_with_guardrails(summary, label="peer_comparison")
 
     result = {
         "ticker": ticker,
         "peers": peers_data,
         "comparison_summary": summary,
         "excluded_peers": excluded_peers,
+        "excluded_reason": (
+            f"Peers {', '.join(excluded_peers)} are not in the tracked tickers list "
+            f"and have no warehouse data. Add them to config/tickers.yaml and run "
+            f"the data pipeline to enable peer comparison."
+        ) if excluded_peers else "",
     }
     logger.info("Peer comparison generated for %s (%d peers)", ticker, len(peers_data) - 1)
     return result
