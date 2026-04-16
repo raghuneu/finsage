@@ -11,6 +11,7 @@ Pipeline:
 
 import sys
 import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -25,6 +26,15 @@ sys.path.insert(0, '/opt/airflow')
 
 DBT_DIR = '/opt/airflow/dbt_finsage'
 
+# Batch processing config for 50-ticker workload
+BATCH_SIZE = 10
+BATCH_DELAYS = {
+    'news': 30,      # NewsAPI: 5 req/min — need longer pauses between batches
+    'default': 5,    # yfinance, SEC EDGAR — shorter courtesy delay
+}
+# Minimum ticker coverage required for loader gate to pass (50%)
+MIN_TICKER_COVERAGE = 25
+
 
 def _load_tickers():
     """Load ticker list from config/tickers.yaml, falling back to defaults."""
@@ -37,6 +47,7 @@ def _load_tickers():
 
 
 TICKERS = _load_tickers()
+print(f"Loaded {len(TICKERS)} tickers from config")
 
 # Default arguments for all tasks
 default_args = {
@@ -45,7 +56,8 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 3,
-    'retry_delay': timedelta(minutes=2),
+    'retry_delay': timedelta(minutes=5),
+    'execution_timeout': timedelta(hours=2),
 }
 
 # Define the DAG
@@ -60,6 +72,38 @@ dag = DAG(
 )
 
 
+# ── Batch helper ──────────────────────────────────────────────
+
+def _run_in_batches(tickers: list, loader, delay_key: str = 'default', **load_kwargs):
+    """Process tickers in batches with delays between batches.
+
+    Returns list of (ticker, success_bool) tuples.
+    """
+    total = len(tickers)
+    delay = BATCH_DELAYS.get(delay_key, BATCH_DELAYS['default'])
+    results = []
+    for i in range(0, total, BATCH_SIZE):
+        batch_num = i // BATCH_SIZE + 1
+        total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
+        batch = tickers[i:i + BATCH_SIZE]
+        for j, ticker in enumerate(batch):
+            idx = i + j + 1
+            print(f"[{idx}/{total}] (batch {batch_num}/{total_batches}) >>> {ticker}")
+            try:
+                loader.load(ticker, **load_kwargs)
+                results.append((ticker, True))
+            except Exception as e:
+                print(f"WARNING: {ticker} failed: {e}")
+                results.append((ticker, False))
+        # Delay between batches (skip after last batch)
+        if i + BATCH_SIZE < total:
+            print(f"Batch {batch_num}/{total_batches} complete — sleeping {delay}s for rate limits")
+            time.sleep(delay)
+    succeeded = sum(1 for _, ok in results if ok)
+    print(f"Finished: {succeeded}/{total} tickers succeeded")
+    return results
+
+
 # ── Task callables using modular loaders ─────────────────────
 
 def fetch_stock_prices():
@@ -67,8 +111,7 @@ def fetch_stock_prices():
     from src.data_loaders.stock_loader import StockPriceLoader
     sf = SnowflakeClient()
     loader = StockPriceLoader(sf)
-    for ticker in TICKERS:
-        loader.load(ticker)
+    _run_in_batches(TICKERS, loader, delay_key='default')
     sf.close()
 
 
@@ -77,8 +120,7 @@ def fetch_fundamentals():
     from src.data_loaders.fundamentals_loader import FundamentalsLoader
     sf = SnowflakeClient()
     loader = FundamentalsLoader(sf)
-    for ticker in TICKERS:
-        loader.load(ticker)
+    _run_in_batches(TICKERS, loader, delay_key='default')
     sf.close()
 
 
@@ -87,8 +129,7 @@ def fetch_news():
     from src.data_loaders.news_loader import NewsLoader
     sf = SnowflakeClient()
     loader = NewsLoader(sf)
-    for ticker in TICKERS:
-        loader.load(ticker)
+    _run_in_batches(TICKERS, loader, delay_key='news')
     sf.close()
 
 
@@ -100,9 +141,21 @@ def fetch_sec_data():
     sf = SnowflakeClient()
     text_loader = SECFilingLoader(sf)
     xbrl_loader = XBRLLoader(sf)
-    for ticker in TICKERS:
-        text_loader.load(ticker, max_filings=2)
-        xbrl_loader.load(ticker)
+    delay = BATCH_DELAYS['default']
+    for i in range(0, len(TICKERS), BATCH_SIZE):
+        batch = TICKERS[i:i + BATCH_SIZE]
+        for ticker in batch:
+            try:
+                text_loader.load(ticker, max_filings=2)
+            except Exception as e:
+                print(f"WARNING: SEC text for {ticker} failed: {e}")
+            try:
+                xbrl_loader.load(ticker)
+            except Exception as e:
+                print(f"WARNING: XBRL for {ticker} failed: {e}")
+        if i + BATCH_SIZE < len(TICKERS):
+            print(f"SEC batch {i // BATCH_SIZE + 1} complete — sleeping {delay}s")
+            time.sleep(delay)
     sf.close()
 
 
@@ -112,10 +165,19 @@ def fetch_s3_filings():
         from scripts.sec_filings.filing_downloader import download_filings_for_ticker
         from scripts.sec_filings.text_extractor import extract_pending_filings
 
-        for ticker in TICKERS:
-            for form_type in ["10-K", "10-Q"]:
-                download_filings_for_ticker(ticker, form_type, count=2)
-            extract_pending_filings(ticker=ticker)
+        delay = BATCH_DELAYS['default']
+        for i in range(0, len(TICKERS), BATCH_SIZE):
+            batch = TICKERS[i:i + BATCH_SIZE]
+            for ticker in batch:
+                try:
+                    for form_type in ["10-K", "10-Q"]:
+                        download_filings_for_ticker(ticker, form_type, count=2)
+                    extract_pending_filings(ticker=ticker)
+                except Exception as e:
+                    print(f"WARNING: S3 filings for {ticker} failed: {e}")
+            if i + BATCH_SIZE < len(TICKERS):
+                print(f"S3 batch {i // BATCH_SIZE + 1} complete — sleeping {delay}s")
+                time.sleep(delay)
     except ImportError:
         print("S3 filing modules not available — skipping")
     except Exception as e:
@@ -124,7 +186,11 @@ def fetch_s3_filings():
 
 
 def check_loaders_success():
-    """Gate: ensure each RAW table has new rows from today before running dbt."""
+    """Gate: ensure RAW tables have sufficient ticker coverage before running dbt.
+
+    With 50 tickers, partial failures are expected (API limits, transient errors).
+    We require at least MIN_TICKER_COVERAGE distinct tickers with new data today.
+    """
     from src.utils.snowflake_client import SnowflakeClient
     sf = SnowflakeClient()
     raw_tables = [
@@ -133,25 +199,25 @@ def check_loaders_success():
         'RAW.RAW_NEWS',
         'RAW.RAW_SEC_FILINGS',
     ]
-    empty = []
+    low_coverage = []
     try:
         for table in raw_tables:
             df = sf.query_to_dataframe(
-                f"SELECT COUNT(*) AS cnt FROM {table} "
+                f"SELECT COUNT(DISTINCT TICKER) AS cnt FROM {table} "
                 f"WHERE ingested_at >= CURRENT_DATE()"
             )
             count = int(df.iloc[0]['CNT']) if not df.empty else 0
-            print(f"  {table}: {count} new rows today")
-            if count == 0:
-                empty.append(table)
+            print(f"  {table}: {count} distinct tickers with new data today")
+            if count < MIN_TICKER_COVERAGE:
+                low_coverage.append(f"{table} ({count}/{MIN_TICKER_COVERAGE})")
     finally:
         sf.close()
 
-    if empty:
+    if low_coverage:
         raise AirflowException(
-            f"Loader gate failed — no new rows today in: {', '.join(empty)}"
+            f"Loader gate failed — insufficient ticker coverage: {', '.join(low_coverage)}"
         )
-    print("All loaders produced fresh rows — proceeding to dbt.")
+    print(f"All tables have >= {MIN_TICKER_COVERAGE} tickers with fresh data — proceeding to dbt.")
 
 
 def data_quality_check():

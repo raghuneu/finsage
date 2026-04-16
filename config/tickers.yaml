@@ -1,37 +1,63 @@
-# FinSage - Companies to Track
+# FinSage - Top 50 US Stocks by Market Cap
 # Edit this list to add/remove stocks
 
 tickers:
-  # Technology (Large Cap)
+  # Technology
   - AAPL   # Apple
   - MSFT   # Microsoft
+  - NVDA   # NVIDIA
   - GOOGL  # Alphabet
+  - META   # Meta Platforms
+  - AVGO   # Broadcom
+  - ORCL   # Oracle
+  - CRM    # Salesforce
+  - ADBE   # Adobe
+  - AMD    # Advanced Micro Devices
+
+  # Consumer / Retail
+  - AMZN   # Amazon
   - TSLA   # Tesla
+  - WMT    # Walmart
+  - HD     # Home Depot
+  - MCD    # McDonald's
+  - NKE    # Nike
+  - COST   # Costco
+  - PEP    # PepsiCo
+  - KO     # Coca-Cola
+  - PG     # Procter & Gamble
+
+  # Finance
   - JPM    # JPMorgan Chase
+  - V      # Visa
+  - MA     # Mastercard
+  - BAC    # Bank of America
+  - WFC    # Wells Fargo
+  - GS     # Goldman Sachs
+  - MS     # Morgan Stanley
+  - BLK    # BlackRock
+  - AXP    # American Express
+  - C      # Citigroup
 
-# Uncomment to add more:
-#  - AMZN   # Amazon
-#  - NVDA   # NVIDIA
-#  - META   # Meta
-#
-#  # Finance
-#  - BAC    # Bank of America
-#  - WFC    # Wells Fargo
-#  - GS     # Goldman Sachs
-#
-#  # Healthcare
-#  - UNH    # UnitedHealth
-#  - JNJ    # Johnson & Johnson
-#  - PFE    # Pfizer
-#
-#  # Consumer
-#  - WMT    # Walmart
-#  - HD     # Home Depot
-#  - KO     # Coca-Cola
-#
-#  # Energy
-#  - XOM    # Exxon Mobil
-#  - CVX    # Chevron
+  # Healthcare
+  - UNH    # UnitedHealth
+  - JNJ    # Johnson & Johnson
+  - LLY    # Eli Lilly
+  - ABBV   # AbbVie
+  - PFE    # Pfizer
+  - MRK    # Merck
+  - TMO    # Thermo Fisher
+  - ABT    # Abbott Labs
+  - DHR    # Danaher
+  - BMY    # Bristol-Myers Squibb
 
-# Add more as needed - just keep the format:
-# - TICKER  # Company Name (optional comment)
+  # Energy / Industrial / Other
+  - XOM    # Exxon Mobil
+  - CVX    # Chevron
+  - LIN    # Linde
+  - NEE    # NextEra Energy
+  - UNP    # Union Pacific
+  - RTX    # RTX (Raytheon)
+  - HON    # Honeywell
+  - CAT    # Caterpillar
+  - BA     # Boeing
+  - NFLX   # Netflix

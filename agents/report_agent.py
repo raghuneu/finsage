@@ -142,6 +142,8 @@ def clean_llm_text(text: str) -> str:
     - Remove **bold** markers (keep the inner text)
     - Remove leading # headers
     - Convert leading '- ' bullet markers to '• '
+    - Strip markdown links [text](url) → text
+    - Strip inline code backticks
     - Collapse runs of whitespace
     """
     if not text:
@@ -150,10 +152,13 @@ def clean_llm_text(text: str) -> str:
     out_lines = []
     for raw in str(text).splitlines():
         line = raw.rstrip()
-        line = _re.sub(r"^\s*#+\s*", "", line)
-        line = _re.sub(r"\*\*(.+?)\*\*", r"\1", line)
-        line = _re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", line)
-        line = _re.sub(r"^\s*[-*]\s+", "• ", line)
+        line = _re.sub(r"#+\s+", "", line)                          # headers anywhere
+        line = _re.sub(r"\*\*(.+?)\*\*", r"\1", line)               # **bold**
+        line = _re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", line)      # *italic*
+        line = _re.sub(r"`([^`]+)`", r"\1", line)                    # `code`
+        line = _re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", line)      # [text](url)
+        line = _re.sub(r"^\s*[-*]\s+", "• ", line)                   # bullet
+        line = _re.sub(r"^\s*\d+\.\s+", "• ", line)                 # numbered list
         out_lines.append(line)
     cleaned = "\n".join(out_lines)
     cleaned = _re.sub(r"\n{3,}", "\n\n", cleaned)
@@ -400,20 +405,14 @@ def investment_rating(charts: list) -> tuple:
     """
     Derive Buy/Hold/Sell rating from chart signals.
     Returns (rating, price_target_multiplier).
+    Uses overall_signal() so the cover page and Section 7 always agree.
     """
-    bullish = 0
-    bearish = 0
-    for c in charts:
-        label, _ = get_signal(c["chart_id"], c.get("data_summary", {}))
-        if "▲" in label:
-            bullish += 1
-        elif "▼" in label:
-            bearish += 1
-    if bullish >= 4:
-        return "BUY", 1.10
-    elif bearish >= 4:
-        return "SELL", 0.90
-    return "HOLD", 1.00
+    signal_label, _ = overall_signal(charts)
+    if "BULLISH" in signal_label:
+        return "BUY", 1.12
+    elif "BEARISH" in signal_label:
+        return "SELL", 0.88
+    return "HOLD", 1.03
 
 
 def build_cover(ticker: str, company_name: str, styles: dict,
@@ -929,7 +928,8 @@ def build_chart_section(chart: dict, analysis_text: str,
     return elements
 
 
-def build_company_overview(ticker: str, analysis: dict, styles: dict) -> list:
+def build_company_overview(ticker: str, analysis: dict, styles: dict,
+                           charts: list = None) -> list:
     """Build Company Overview page with AI description + key facts table."""
     elements = []
     elements.append(Paragraph("2. Company Overview", styles["page_title"]))
@@ -952,6 +952,14 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict) -> list:
 
     facts = overview.get("key_facts", {})
 
+    # Use financial_health chart data as authoritative source for margin/D/E
+    # to stay consistent with the Executive Summary on page 3.
+    _fin_chart = {}
+    for c in (charts or []):
+        if c["chart_id"] == "financial_health":
+            _fin_chart = c.get("data_summary", {})
+            break
+
     def _fmt_mc(v):
         if not v or not isinstance(v, (int, float)):
             return "N/A"
@@ -969,13 +977,15 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict) -> list:
             return f"{v*100:.1f}%"
         return f"{v:.1f}%"
 
+    _de_val = _fin_chart.get("debt_to_equity_ratio") or facts.get("debt_to_equity")
+
     facts_rows = [
         ["Metric", "Value"],
         ["Market Capitalization", _fmt_mc(facts.get("market_cap"))],
         ["Market Cap Category", str(facts.get("market_cap_category", "N/A"))],
         ["P/E Ratio", f"{facts['pe_ratio']:.1f}" if facts.get("pe_ratio") else "N/A"],
-        ["Net Margin", _fmt_pct(facts.get("net_margin") or facts.get("profit_margin"))],
-        ["Debt-to-Equity", f"{facts['debt_to_equity']:.2f}" if facts.get("debt_to_equity") else "N/A"],
+        ["Net Margin", _fmt_pct(_fin_chart.get("net_margin_pct") or facts.get("net_margin") or facts.get("profit_margin"))],
+        ["Debt-to-Equity", f"{float(_de_val):.2f}" if _de_val else "N/A"],
         ["Latest Quarter", str(facts.get("latest_quarter", "N/A"))],
         ["Revenue (Latest Q)", _fmt_mc(facts.get("revenue"))],
         ["Net Income (Latest Q)", _fmt_mc(facts.get("net_income"))],
@@ -1699,7 +1709,7 @@ def build_pdf(
     elements += build_executive_summary(ticker, charts, analysis, styles)
 
     # Page 5: Company Overview
-    elements += build_company_overview(ticker, analysis, styles)
+    elements += build_company_overview(ticker, analysis, styles, charts=charts)
 
     # Pages 6-11: Chart sections (one per page)
     elements.append(Paragraph("3. Analysis Sections", styles["page_title"]))

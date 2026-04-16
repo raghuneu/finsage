@@ -156,8 +156,8 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
             logger.error(f"{ticker} - Exception: {e}")
             return ('failed', ticker)
 
-    # Process tickers in parallel (max 3 concurrent to respect API rate limits)
-    with ThreadPoolExecutor(max_workers=min(3, len(tickers))) as executor:
+    # Process tickers in parallel (max 5 concurrent to respect API rate limits)
+    with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as executor:
         futures = {
             executor.submit(_process_ticker, ticker, idx, len(tickers)): ticker
             for idx, ticker in enumerate(tickers, 1)

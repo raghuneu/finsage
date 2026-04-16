@@ -360,7 +360,7 @@ def inject_css():
         color: #00d4ff;
         font-size: 0.8rem;
         cursor: pointer;
-        margin: 4px;
+        margin: 6px;
         background: transparent;
         transition: background 0.2s;
     }

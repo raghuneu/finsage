@@ -23,7 +23,15 @@ WITH base AS (
         profit_margin,
         debt_to_equity,
         total_assets,
-        total_liabilities
+        total_liabilities,
+
+        -- Chronological sort key: "Q1 2025" → year=2025, qtr=1
+        CAST(SPLIT_PART(fiscal_quarter, ' ', 2) AS INT)  AS _sort_year,
+        CASE SPLIT_PART(fiscal_quarter, ' ', 1)
+            WHEN 'Q1' THEN 1  WHEN 'Q2' THEN 2
+            WHEN 'Q3' THEN 3  WHEN 'Q4' THEN 4
+            ELSE 0
+        END                                               AS _sort_qtr
     FROM {{ ref('stg_fundamentals') }}
 ),
 
@@ -54,59 +62,59 @@ with_growth AS (
 
         -- ── QoQ Growth (vs previous quarter) ─────────────────
         LAG(revenue, 1) OVER (
-            PARTITION BY ticker ORDER BY fiscal_quarter
+            PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
         )                                       AS revenue_prev_quarter,
 
         ROUND(
             (revenue - LAG(revenue, 1) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )) / NULLIF(LAG(revenue, 1) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             ), 0) * 100, 4
         )                                       AS revenue_growth_qoq_pct,
 
         ROUND(
             (net_income - LAG(net_income, 1) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )) / NULLIF(ABS(LAG(net_income, 1) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )), 0) * 100, 4
         )                                       AS net_income_growth_qoq_pct,
 
         ROUND(
             (eps - LAG(eps, 1) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )) / NULLIF(ABS(LAG(eps, 1) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )), 0) * 100, 4
         )                                       AS eps_growth_qoq_pct,
 
         -- ── YoY Growth (vs same quarter last year) ────────────
         LAG(revenue, 4) OVER (
-            PARTITION BY ticker ORDER BY fiscal_quarter
+            PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
         )                                       AS revenue_same_quarter_ly,
 
         ROUND(
             (revenue - LAG(revenue, 4) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )) / NULLIF(LAG(revenue, 4) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             ), 0) * 100, 4
         )                                       AS revenue_growth_yoy_pct,
 
         ROUND(
             (net_income - LAG(net_income, 4) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )) / NULLIF(ABS(LAG(net_income, 4) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )), 0) * 100, 4
         )                                       AS net_income_growth_yoy_pct,
 
         ROUND(
             (eps - LAG(eps, 4) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )) / NULLIF(ABS(LAG(eps, 4) OVER (
-                PARTITION BY ticker ORDER BY fiscal_quarter
+                PARTITION BY ticker ORDER BY _sort_year, _sort_qtr
             )), 0) * 100, 4
         )                                       AS eps_growth_yoy_pct
 
@@ -155,4 +163,10 @@ SELECT
     CURRENT_TIMESTAMP() AS dbt_updated_at
 
 FROM with_growth
-ORDER BY ticker, fiscal_quarter
+ORDER BY ticker,
+         CAST(SPLIT_PART(fiscal_quarter, ' ', 2) AS INT),
+         CASE SPLIT_PART(fiscal_quarter, ' ', 1)
+             WHEN 'Q1' THEN 1  WHEN 'Q2' THEN 2
+             WHEN 'Q3' THEN 3  WHEN 'Q4' THEN 4
+             ELSE 0
+         END
