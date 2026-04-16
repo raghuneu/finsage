@@ -90,6 +90,7 @@ x-airflow-common: &airflow-common
     - ../src:/opt/airflow/src
     - ../config:/opt/airflow/config
     - ../dbt_finsage:/opt/airflow/dbt_finsage
+    - ~/.dbt:/home/airflow/.dbt
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     redis:
