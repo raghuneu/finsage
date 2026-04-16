@@ -61,7 +61,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             lineHeight: 1,
           }}
         >
-          FinSage
+          Fin
+          <Box
+            component="span"
+            sx={{
+              backgroundColor: 'rgba(6, 214, 160, 0.12)',
+              borderRadius: '4px',
+              px: 0.5,
+            }}
+          >
+            Sage
+          </Box>
         </Typography>
         <Box
           sx={{
@@ -187,7 +197,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Footer */}
       <Box sx={{ p: 2 }}>
         <Typography variant="caption" sx={{ color: '#C4BFB5', fontSize: '0.58rem' }}>
-          DAMG 7374 &middot; FinSage v2.0
+          DAMG 7374 &middot; Fin<Box component="span" sx={{ backgroundColor: 'rgba(6, 214, 160, 0.12)', borderRadius: '4px', px: 0.4 }}>Sage</Box> v2.0
         </Typography>
       </Box>
     </Box>
@@ -214,7 +224,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 color: '#2C2A25',
               }}
             >
-              FinSage
+              Fin
+              <Box
+                component="span"
+                sx={{
+                  backgroundColor: 'rgba(6, 214, 160, 0.12)',
+                  borderRadius: '4px',
+                  px: 0.5,
+                }}
+              >
+                Sage
+              </Box>
             </Typography>
             <Box
               sx={{

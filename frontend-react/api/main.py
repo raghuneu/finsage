@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from routers import dashboard, analytics, sec, report, chat
+from routers import dashboard, analytics, sec, report, chat, pipeline
 
 app = FastAPI(title="FinSage API", version="1.0.0")
 
@@ -22,6 +22,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(sec.router, prefix="/api/sec", tags=["sec"])
 app.include_router(report.router, prefix="/api/report", tags=["report"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"])
 
 # Serve generated PDFs / chart images
 outputs_dir = Path(__file__).resolve().parent.parent.parent / "outputs"

@@ -188,15 +188,52 @@ export default function DashboardPage() {
                 <ListItem
                   key={i}
                   divider={i < headlines.length - 1}
-                  sx={{ borderColor: '#E8E4DB' }}
+                  sx={{
+                    borderColor: '#E8E4DB',
+                    py: 1.5,
+                    px: 2.5,
+                    transition: 'background-color 0.2s ease',
+                    '&:hover': {
+                      backgroundColor: 'rgba(201, 107, 174, 0.04)',
+                    },
+                  }}
                 >
-                  <CircleIcon sx={{ fontSize: 6, color: '#C96BAE', mr: 1.5 }} />
+                  <Box
+                    sx={{
+                      width: 3,
+                      alignSelf: 'stretch',
+                      backgroundColor: '#C96BAE',
+                      borderRadius: 1,
+                      mr: 2,
+                      flexShrink: 0,
+                    }}
+                  />
                   <ListItemText
                     primary={h.title}
-                    secondary={`${(h.published_at || '').slice(0, 10)}${h.source_name ? ' | ' + h.source_name : ''}`}
+                    secondary={
+                      <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                        <Typography component="span" sx={{ fontSize: '0.7rem', color: '#9A9590' }}>
+                          {(h.published_at || '').slice(0, 10)}
+                        </Typography>
+                        {h.source_name && (
+                          <>
+                            <CircleIcon sx={{ fontSize: 4, color: '#D4CFC9' }} />
+                            <Typography component="span" sx={{ fontSize: '0.7rem', color: '#B0AAA3', fontStyle: 'italic' }}>
+                              {h.source_name}
+                            </Typography>
+                          </>
+                        )}
+                      </Box>
+                    }
                     slotProps={{
-                      primary: { sx: { fontSize: '0.85rem', fontWeight: 500, color: '#2C2A25' } },
-                      secondary: { sx: { fontSize: '0.75rem', color: '#9A9590' } },
+                      primary: {
+                        sx: {
+                          fontSize: '0.85rem',
+                          fontWeight: 500,
+                          color: '#2C2A25',
+                          lineHeight: 1.5,
+                        },
+                      },
                     }}
                   />
                 </ListItem>

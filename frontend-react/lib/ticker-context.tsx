@@ -29,8 +29,16 @@ export function TickerProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
+  const handleSetTicker = (t: string) => {
+    const clean = t.replace(/[^A-Z0-9.]/gi, '').toUpperCase();
+    if (!clean) return;
+    setTicker(clean);
+    // Add to suggestions list if not already present
+    setTickers((prev) => (prev.includes(clean) ? prev : [...prev, clean]));
+  };
+
   return (
-    <TickerContext.Provider value={{ ticker, setTicker, tickers }}>
+    <TickerContext.Provider value={{ ticker, setTicker: handleSetTicker, tickers }}>
       {children}
     </TickerContext.Provider>
   );

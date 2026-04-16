@@ -1,6 +1,7 @@
 """Report API — Quick report and CAVM pipeline."""
 
 import os
+import sys
 import uuid
 import threading
 from typing import Dict, Optional
@@ -9,6 +10,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from deps import get_snowpark_session
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 router = APIRouter()
 
@@ -25,6 +29,7 @@ class CAVMRequest(BaseModel):
     debug: bool = False
     skip_charts: bool = False
     charts_dir: Optional[str] = None
+    auto_load: bool = True  # automatically load missing data before pipeline
 
 
 @router.post("/quick")
@@ -41,8 +46,21 @@ def quick_report(req: QuickReportRequest, session=Depends(get_snowpark_session))
 
 
 @router.post("/cavm")
-def start_cavm_pipeline(req: CAVMRequest):
+def start_cavm_pipeline(req: CAVMRequest, session=Depends(get_snowpark_session)):
     ticker = req.ticker.upper().strip()
+
+    # Pre-flight readiness check
+    from utils.data_readiness import check_data_readiness
+    readiness = check_data_readiness(session, ticker)
+
+    if not readiness["min_viable"] and not req.auto_load:
+        return {
+            "error": "insufficient_data",
+            "readiness": readiness,
+            "message": f"Required data missing for {ticker}: {', '.join(readiness['missing'])}. "
+                       f"Use POST /api/pipeline/load to fetch data first, or set auto_load=true.",
+        }
+
     task_id = str(uuid.uuid4())[:8]
 
     _tasks[task_id] = {
@@ -51,10 +69,17 @@ def start_cavm_pipeline(req: CAVMRequest):
         "ticker": ticker,
         "result": None,
         "error": None,
+        "auto_load": req.auto_load and not readiness["ready"],
     }
 
     def _run():
         try:
+            # Auto-load missing data if requested
+            if req.auto_load and not readiness["ready"]:
+                _tasks[task_id]["stage"] = -1  # indicates data loading
+                from utils.on_demand_loader import ensure_data_for_ticker
+                ensure_data_for_ticker(ticker=ticker)
+
             from orchestrator import generate_report_pipeline
 
             result = generate_report_pipeline(
@@ -82,7 +107,7 @@ def start_cavm_pipeline(req: CAVMRequest):
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
 
-    return {"task_id": task_id}
+    return {"task_id": task_id, "readiness": readiness}
 
 
 @router.get("/cavm/status/{task_id}")
