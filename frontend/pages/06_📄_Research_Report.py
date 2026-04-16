@@ -129,7 +129,7 @@ pills_html = " ".join(
 st.markdown(
     f'<div class="fs-card fs-card-accent">'
     f'<h4>Report Sections</h4>'
-    f'<div style="margin-top:8px">{pills_html}</div>'
+    f'<div style="margin-top:12px">{pills_html}</div>'
     f'</div>',
     unsafe_allow_html=True,
 )

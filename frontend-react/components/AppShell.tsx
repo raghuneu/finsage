@@ -26,6 +26,7 @@ import ArticleIcon from '@mui/icons-material/Article';
 import ChatIcon from '@mui/icons-material/Chat';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useTicker } from '@/lib/ticker-context';
+import { getCompanyName } from '@/lib/company-names';
 
 const DRAWER_WIDTH = 220;
 
@@ -61,17 +62,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             lineHeight: 1,
           }}
         >
-          Fin
-          <Box
-            component="span"
-            sx={{
-              backgroundColor: 'rgba(6, 214, 160, 0.12)',
-              borderRadius: '4px',
-              px: 0.5,
-            }}
-          >
-            Sage
-          </Box>
+          FinSage
         </Typography>
         <Box
           sx={{
@@ -79,7 +70,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             width: 28,
             height: 2,
             borderRadius: 1,
-            background: 'linear-gradient(90deg, #C96BAE 0%, transparent 100%)',
+            background: 'linear-gradient(90deg, #C96BAE 0%, #0382B7 60%, transparent 100%)',
           }}
         />
         <Typography
@@ -119,7 +110,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           options={tickers}
           size="small"
           disableClearable
-          sx={{ mt: 0.5 }}
+          sx={{ mt: 0.5, backgroundColor: 'rgba(3,130,183,0.06)', borderRadius: '8px' }}
+          renderOption={(props, option) => (
+            <li {...props} key={option}>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Typography sx={{ fontSize: '0.82rem', fontWeight: 600, color: '#0382B7' }}>
+                  {option}
+                </Typography>
+                {getCompanyName(option) && (
+                  <Typography sx={{ fontSize: '0.65rem', color: '#9A9590', lineHeight: 1.2 }}>
+                    {getCompanyName(option)}
+                  </Typography>
+                )}
+              </Box>
+            </li>
+          )}
           renderInput={(params) => (
             <TextField
               {...params}
@@ -135,6 +140,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             />
           )}
         />
+        {getCompanyName(ticker) && (
+          <Typography
+            sx={{
+              mt: 0.5,
+              fontSize: '0.62rem',
+              color: '#9A9590',
+              lineHeight: 1.2,
+              px: 0.5,
+            }}
+          >
+            {getCompanyName(ticker)}
+          </Typography>
+        )}
       </Box>
 
       <Divider />
@@ -239,18 +257,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Box
               sx={{
                 ml: 'auto',
-                px: 1.5,
-                py: 0.25,
-                borderRadius: '6px',
-                backgroundColor: 'rgba(3,130,183,0.06)',
-                border: '1px solid rgba(3,130,183,0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
               }}
             >
-              <Typography
-                sx={{ color: '#0382B7', fontWeight: 600, fontSize: '0.8rem' }}
+              <Box
+                sx={{
+                  px: 1.5,
+                  py: 0.25,
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(3,130,183,0.06)',
+                  border: '1px solid rgba(3,130,183,0.12)',
+                }}
               >
-                {ticker}
-              </Typography>
+                <Typography
+                  sx={{ color: '#0382B7', fontWeight: 600, fontSize: '0.8rem' }}
+                >
+                  {ticker}
+                </Typography>
+              </Box>
+              {getCompanyName(ticker) && (
+                <Typography
+                  sx={{
+                    color: '#6B6760',
+                    fontSize: '0.7rem',
+                    fontWeight: 400,
+                    maxWidth: 120,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {getCompanyName(ticker)}
+                </Typography>
+              )}
             </Box>
           </Toolbar>
         </AppBar>
@@ -302,13 +343,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 px: 1.5,
                 py: 0.25,
                 borderRadius: '6px',
-                backgroundColor: 'rgba(248,203,134,0.10)',
-                border: '1px solid rgba(248,203,134,0.25)',
+                backgroundColor: 'rgba(3,130,183,0.10)',
+                border: '1px solid rgba(3,130,183,0.25)',
               }}
             >
               <Typography
                 sx={{
-                  color: '#F8CB86',
+                  color: '#0382B7',
                   fontWeight: 600,
                   fontSize: '0.85rem',
                   letterSpacing: '0.03em',
@@ -317,6 +358,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 {ticker}
               </Typography>
             </Box>
+            {getCompanyName(ticker) && (
+              <Typography
+                sx={{
+                  color: '#6B6760',
+                  fontSize: '0.9rem',
+                  fontWeight: 400,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {getCompanyName(ticker)}
+              </Typography>
+            )}
           </Box>
         )}
         {children}

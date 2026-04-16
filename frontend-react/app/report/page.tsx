@@ -125,11 +125,11 @@ export default function ReportPage() {
         <CardContent>
           <Typography
             variant="h6"
-            sx={{ fontFamily: '"DM Serif Display", Georgia, serif', fontWeight: 400, mb: 1 }}
+            sx={{ fontFamily: '"DM Serif Display", Georgia, serif', fontWeight: 400, mb: 1.5 }}
           >
             Report Sections
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
             {REPORT_SECTIONS.map((s, i) => (
               <Chip
                 key={s}

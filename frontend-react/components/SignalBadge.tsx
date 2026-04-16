@@ -4,18 +4,18 @@ import React from 'react';
 import { Chip } from '@mui/material';
 
 const SIGNAL_COLORS: Record<string, { bg: string; text: string }> = {
-  BULLISH:         { bg: 'rgba(157,203,184,0.12)', text: '#9DCBB8' },
-  STRONG_GROWTH:   { bg: 'rgba(157,203,184,0.12)', text: '#9DCBB8' },
-  EXCELLENT:       { bg: 'rgba(157,203,184,0.12)', text: '#9DCBB8' },
-  HEALTHY:         { bg: 'rgba(157,203,184,0.12)', text: '#9DCBB8' },
-  MODERATE_GROWTH: { bg: 'rgba(248,203,134,0.12)', text: '#F8CB86' },
-  NEUTRAL:         { bg: 'rgba(248,203,134,0.12)', text: '#F8CB86' },
-  MIXED:           { bg: 'rgba(248,203,134,0.12)', text: '#F8CB86' },
-  FAIR:            { bg: 'rgba(248,203,134,0.12)', text: '#F8CB86' },
+  BULLISH:         { bg: 'rgba(34,160,100,0.10)', text: '#1A9E60' },
+  STRONG_GROWTH:   { bg: 'rgba(34,160,100,0.10)', text: '#1A9E60' },
+  EXCELLENT:       { bg: 'rgba(34,160,100,0.10)', text: '#1A9E60' },
+  HEALTHY:         { bg: 'rgba(34,160,100,0.10)', text: '#1A9E60' },
+  MODERATE_GROWTH: { bg: 'rgba(210,150,20,0.10)', text: '#C08C00' },
+  NEUTRAL:         { bg: 'rgba(210,150,20,0.10)', text: '#C08C00' },
+  MIXED:           { bg: 'rgba(210,150,20,0.10)', text: '#C08C00' },
+  FAIR:            { bg: 'rgba(210,150,20,0.10)', text: '#C08C00' },
   NO_COVERAGE:     { bg: 'rgba(138,134,120,0.12)', text: '#8A8678' },
-  BEARISH:         { bg: 'rgba(229,139,109,0.12)', text: '#E58B6D' },
-  DECLINING:       { bg: 'rgba(229,139,109,0.12)', text: '#E58B6D' },
-  UNPROFITABLE:    { bg: 'rgba(229,139,109,0.12)', text: '#E58B6D' },
+  BEARISH:         { bg: 'rgba(210,60,40,0.10)', text: '#C9392C' },
+  DECLINING:       { bg: 'rgba(210,60,40,0.10)', text: '#C9392C' },
+  UNPROFITABLE:    { bg: 'rgba(210,60,40,0.10)', text: '#C9392C' },
 };
 
 interface SignalBadgeProps {
@@ -34,8 +34,9 @@ export default function SignalBadge({ label, signal }: SignalBadgeProps) {
       sx={{
         backgroundColor: colors.bg,
         color: colors.text,
-        fontWeight: 600,
-        fontSize: '0.7rem',
+        fontWeight: 700,
+        fontSize: '0.72rem',
+        letterSpacing: '0.02em',
         border: `1px solid ${colors.text}20`,
         boxShadow: `0 0 12px ${colors.text}08`,
       }}

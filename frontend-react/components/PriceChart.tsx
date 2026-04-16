@@ -118,8 +118,8 @@ export default function PriceChart({
             value: d.volume!,
             color:
               d.close != null && d.open != null && d.close >= d.open
-                ? '#9DCBB860'  // Turquoise Green (bullish)
-                : '#E58B6D60', // Middle Red (bearish)
+                ? '#26a69a80'  // green (bullish)
+                : '#ef535080', // red (bearish)
           }))
       );
     }
