@@ -37,6 +37,7 @@ load_dotenv()
 
 from snowflake_connection import get_session
 from chart_agent import generate_charts, regenerate_single_chart
+from chart_specs import CANONICAL_CHART_ORDER
 from validation_agent import validate_all_charts, validate_chart
 from analysis_agent import run_analysis, generate_company_overview, generate_peer_comparison, generate_financial_deep_dive, generate_valuation_analysis
 from report_agent import generate_report
@@ -378,6 +379,10 @@ def generate_report_pipeline(
                                chart_id, MAX_ATTEMPTS, reason)
 
         passing_charts = [c for c in validated_charts if c.get("validated")]
+
+        # ── Restore canonical chart ordering for deterministic PDF ──
+        chart_order_map = {cid: idx for idx, cid in enumerate(CANONICAL_CHART_ORDER)}
+        passing_charts.sort(key=lambda c: chart_order_map.get(c.get("chart_id", ""), 99))
 
         if len(skipped) > 2:
             details = "; ".join(f"{cid}: {r}" for cid, r in skipped)
