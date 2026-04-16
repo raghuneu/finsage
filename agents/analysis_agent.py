@@ -22,6 +22,7 @@ Outputs:
 
 import os
 import logging
+import threading
 from typing import Optional
 from snowflake.snowpark import Session
 
@@ -62,15 +63,19 @@ KB_QUERIES = {
 
 # ──────────────────────────────────────────────────────────────
 # Lazy Bedrock client singletons (initialized on first use)
+# Thread-safe via double-checked locking.
 # ──────────────────────────────────────────────────────────────
 _guardrail = None
 _guardrail_checked = False
+_guardrail_lock = threading.Lock()
 
 _bedrock_kb = None
 _bedrock_kb_checked = False
+_bedrock_kb_lock = threading.Lock()
 
 _multi_model = None
 _multi_model_checked = False
+_multi_model_lock = threading.Lock()
 
 
 def _get_guardrail():
@@ -78,16 +83,19 @@ def _get_guardrail():
     global _guardrail, _guardrail_checked
     if _guardrail_checked:
         return _guardrail
-    _guardrail_checked = True
-    if not os.getenv("BEDROCK_GUARDRAIL_ID"):
-        logger.info("BEDROCK_GUARDRAIL_ID not set — guardrails disabled")
-        return None
-    try:
-        from sec_filings.guardrails import GuardedLLM
-        _guardrail = GuardedLLM()
-        logger.info("Guardrails initialized")
-    except Exception as e:
-        logger.warning("Could not initialize guardrails: %s", e)
+    with _guardrail_lock:
+        if _guardrail_checked:
+            return _guardrail
+        _guardrail_checked = True
+        if not os.getenv("BEDROCK_GUARDRAIL_ID"):
+            logger.info("BEDROCK_GUARDRAIL_ID not set — guardrails disabled")
+            return None
+        try:
+            from sec_filings.guardrails import GuardedLLM
+            _guardrail = GuardedLLM()
+            logger.info("Guardrails initialized")
+        except Exception as e:
+            logger.warning("Could not initialize guardrails: %s", e)
     return _guardrail
 
 
@@ -96,16 +104,19 @@ def _get_bedrock_kb():
     global _bedrock_kb, _bedrock_kb_checked
     if _bedrock_kb_checked:
         return _bedrock_kb
-    _bedrock_kb_checked = True
-    if not os.getenv("BEDROCK_KB_ID"):
-        logger.info("BEDROCK_KB_ID not set — Bedrock KB RAG disabled")
-        return None
-    try:
-        from sec_filings.bedrock_kb import BedrockKB
-        _bedrock_kb = BedrockKB()
-        logger.info("Bedrock KB initialized")
-    except Exception as e:
-        logger.warning("Could not initialize Bedrock KB: %s", e)
+    with _bedrock_kb_lock:
+        if _bedrock_kb_checked:
+            return _bedrock_kb
+        _bedrock_kb_checked = True
+        if not os.getenv("BEDROCK_KB_ID"):
+            logger.info("BEDROCK_KB_ID not set — Bedrock KB RAG disabled")
+            return None
+        try:
+            from sec_filings.bedrock_kb import BedrockKB
+            _bedrock_kb = BedrockKB()
+            logger.info("Bedrock KB initialized")
+        except Exception as e:
+            logger.warning("Could not initialize Bedrock KB: %s", e)
     return _bedrock_kb
 
 
@@ -114,13 +125,16 @@ def _get_multi_model():
     global _multi_model, _multi_model_checked
     if _multi_model_checked:
         return _multi_model
-    _multi_model_checked = True
-    try:
-        from sec_filings.multi_model import MultiModelAnalyzer
-        _multi_model = MultiModelAnalyzer()
-        logger.info("MultiModelAnalyzer initialized")
-    except Exception as e:
-        logger.warning("Could not initialize MultiModelAnalyzer: %s", e)
+    with _multi_model_lock:
+        if _multi_model_checked:
+            return _multi_model
+        _multi_model_checked = True
+        try:
+            from sec_filings.multi_model import MultiModelAnalyzer
+            _multi_model = MultiModelAnalyzer()
+            logger.info("MultiModelAnalyzer initialized")
+        except Exception as e:
+            logger.warning("Could not initialize MultiModelAnalyzer: %s", e)
     return _multi_model
 
 

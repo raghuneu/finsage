@@ -5,13 +5,8 @@ from dotenv import load_dotenv
 from snowflake.snowpark import Session
 
 
-def get_session():
-    """Create and return a Snowflake session.
-    
-    Auth priority:
-        1. Programmatic Access Token (SNOWFLAKE_TOKEN)
-        2. Password (for teammates without MFA)
-    """
+def _build_connection_params() -> dict:
+    """Build Snowflake connection parameters from environment variables."""
     load_dotenv()
 
     connection_params = {
@@ -50,4 +45,30 @@ def get_session():
             )
         connection_params["password"] = password
 
-    return Session.builder.configs(connection_params).create()
+    return connection_params
+
+
+def get_session() -> Session:
+    """Create and return a Snowflake session.
+
+    Auth priority:
+        1. Programmatic Access Token (SNOWFLAKE_TOKEN)
+        2. Password (for teammates without MFA)
+    """
+    return Session.builder.configs(_build_connection_params()).create()
+
+
+def create_session_pool(size: int) -> list:
+    """Create multiple independent Snowflake sessions for parallel work.
+
+    Each session is fully independent and safe to use from a separate thread.
+    Caller is responsible for closing all sessions when done.
+
+    Args:
+        size: Number of sessions to create.
+
+    Returns:
+        List of Snowflake Session objects.
+    """
+    params = _build_connection_params()
+    return [Session.builder.configs(params).create() for _ in range(size)]

@@ -15,6 +15,7 @@ Output: Same list with 'validated' field updated + validation_notes added
 import os
 import sys
 import logging
+import concurrent.futures
 from pathlib import Path
 from PIL import Image
 
@@ -214,11 +215,11 @@ def validate_chart(session, chart: dict) -> dict:
 
 def validate_all_charts(session, charts: list) -> list:
     """
-    Validate all charts. Attempts one re-render for failed charts
+    Validate all charts in parallel. Attempts one re-render for failed charts
     using the fallback_code path in chart_agent.
 
     Args:
-        session: Snowflake session
+        session: Snowflake session (unused — each worker creates its own)
         charts: List of ChartResult dicts from chart_agent
 
     Returns:
@@ -228,38 +229,57 @@ def validate_all_charts(session, charts: list) -> list:
     logger.info("Validation Agent starting (%d charts)", len(charts))
     logger.info("═" * 50)
 
-    validated = []
-    for chart in charts:
-        result = validate_chart(session, chart)
+    def _validate_one(chart):
+        worker_session = get_session()
+        try:
+            result = validate_chart(worker_session, chart)
 
-        # One re-render attempt for failed charts
-        if not result["validated"] and result.get("refinement_count", 0) > 0:
-            logger.warning(
-                "Chart %s failed validation — attempting fallback re-render",
-                chart["chart_id"]
-            )
-            # Import here to avoid circular import
-            from agents.chart_agent import CHART_DEFINITIONS, execute_chart_code
-            defn = CHART_DEFINITIONS.get(chart["chart_id"])
-            df = chart.get("_df")
-            if defn and df is not None:
-                success = execute_chart_code(
-                    defn["fallback_code"],
-                    df,
-                    chart["file_path"]
-                )
-                if success:
-                    result = validate_chart(session, chart)
-                    logger.info("Re-render result for %s: %s",
-                                chart["chart_id"],
-                                "✅ PASSED" if result["validated"] else "❌ STILL FAILED")
-            elif defn and df is None:
+            # One re-render attempt for failed charts
+            if not result["validated"] and result.get("refinement_count", 0) > 0:
                 logger.warning(
-                    "Cannot re-render %s — DataFrame not available (loaded from manifest?)",
+                    "Chart %s failed validation — attempting fallback re-render",
                     chart["chart_id"]
                 )
+                from agents.chart_agent import CHART_DEFINITIONS, execute_chart_code
+                defn = CHART_DEFINITIONS.get(chart["chart_id"])
+                df = chart.get("_df")
+                if defn and df is not None:
+                    success = execute_chart_code(
+                        defn["fallback_code"],
+                        df,
+                        chart["file_path"]
+                    )
+                    if success:
+                        result = validate_chart(worker_session, chart)
+                        logger.info("Re-render result for %s: %s",
+                                    chart["chart_id"],
+                                    "✅ PASSED" if result["validated"] else "❌ STILL FAILED")
+                elif defn and df is None:
+                    logger.warning(
+                        "Cannot re-render %s — DataFrame not available (loaded from manifest?)",
+                        chart["chart_id"]
+                    )
 
-        validated.append(result)
+            return result
+        finally:
+            try:
+                worker_session.close()
+            except Exception:
+                pass
+
+    max_workers = min(4, len(charts)) if charts else 1
+    logger.info("Validating %d charts in parallel (max_workers=%d)", len(charts), max_workers)
+
+    validated = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_validate_one, c): c.get("chart_id", i)
+                   for i, c in enumerate(charts)}
+        for future in concurrent.futures.as_completed(futures):
+            chart_id = futures[future]
+            try:
+                validated.append(future.result())
+            except Exception:
+                logger.exception("Validation failed for chart '%s'", chart_id)
 
     # Summary
     passed = sum(1 for c in validated if c["validated"])

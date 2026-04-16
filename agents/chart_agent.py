@@ -1235,6 +1235,9 @@ def generate_charts(
     }
 
     results = []
+
+    # Build list of charts to generate (pre-filter empty/insufficient data)
+    chart_tasks = []
     for chart_id, (df, summary_fn) in chart_data_map.items():
         if df.empty:
             logger.warning("No data for chart '%s', skipping", chart_id)
@@ -1248,15 +1251,44 @@ def generate_charts(
             )
             continue
 
-        # Compute data_summary BEFORE chart generation so VLM critique has context
         data_summary = summary_fn(df)
+        chart_tasks.append((chart_id, df, data_summary))
 
-        chart_result = generate_single_chart(
-            session, chart_id, ticker, df, out, debug=debug,
-            data_summary=data_summary,
-        )
-        chart_result["data_summary"] = data_summary
-        results.append(chart_result)
+    # Generate charts in parallel (each worker gets its own Snowflake session)
+    MAX_CHART_WORKERS = min(4, len(chart_tasks)) if chart_tasks else 1
+    logger.info(
+        "Generating %d charts in parallel (max_workers=%d)",
+        len(chart_tasks), MAX_CHART_WORKERS,
+    )
+
+    def _generate_one(task_tuple):
+        cid, cdf, csummary = task_tuple
+        worker_session = get_session()
+        try:
+            chart_result = generate_single_chart(
+                worker_session, cid, ticker, cdf, out, debug=debug,
+                data_summary=csummary,
+            )
+            chart_result["data_summary"] = csummary
+            return chart_result
+        finally:
+            try:
+                worker_session.close()
+            except Exception:
+                pass
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CHART_WORKERS) as executor:
+        futures = {
+            executor.submit(_generate_one, task): task[0]
+            for task in chart_tasks
+        }
+        for future in concurrent.futures.as_completed(futures):
+            chart_id = futures[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception:
+                logger.exception("Chart '%s' failed in parallel generation", chart_id)
 
     logger.info(
         "Chart Agent complete: %d/%d charts generated",

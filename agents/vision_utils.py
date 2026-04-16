@@ -12,6 +12,7 @@ Fallback VLM: pixtral-large via Snowflake Cortex
 
 import logging
 import os
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 FALLBACK_VLM = "pixtral-large"
 CHART_STAGE = "FINSAGE_DB.RAW.CHART_IMAGES_STAGE"
 _stage_ensured = False
+_stage_lock = threading.Lock()
 
 
 def ensure_chart_stage(session) -> None:
@@ -26,13 +28,16 @@ def ensure_chart_stage(session) -> None:
     global _stage_ensured
     if _stage_ensured:
         return
-    session.sql(
-        f"CREATE STAGE IF NOT EXISTS {CHART_STAGE} "
-        f"DIRECTORY = (ENABLE = TRUE) "
-        f"ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')"
-    ).collect()
-    _stage_ensured = True
-    logger.info("Chart image stage ensured: %s", CHART_STAGE)
+    with _stage_lock:
+        if _stage_ensured:          # double-checked locking
+            return
+        session.sql(
+            f"CREATE STAGE IF NOT EXISTS {CHART_STAGE} "
+            f"DIRECTORY = (ENABLE = TRUE) "
+            f"ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')"
+        ).collect()
+        _stage_ensured = True
+        logger.info("Chart image stage ensured: %s", CHART_STAGE)
 
 
 def upload_chart_to_stage(session, local_path: str) -> str:
