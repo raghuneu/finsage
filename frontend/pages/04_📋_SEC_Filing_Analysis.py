@@ -128,13 +128,14 @@ if not _agent_available:
 if filing_source == "filings":
     st.markdown(
         '<div class="fs-card" style="border-left:3px solid #00d4ff">'
+        '<div style="color:#00d4ff;font-weight:600">Analytics-Only Mode</div>'
         '<div style="color:#6b7280;font-size:0.85rem">'
-        'Document-level analysis requires extracted filing text (RAW_SEC_FILING_DOCUMENTS). '
-        'Only XBRL financial data is available. Run the SEC extraction pipeline to enable full analysis.'
+        'No extracted filing text (RAW_SEC_FILING_DOCUMENTS) found for this ticker. '
+        'Analysis will use quantitative data from the analytics pipeline. '
+        'Run the SEC extraction pipeline to enable full text-based analysis.'
         '</div></div>',
         unsafe_allow_html=True,
     )
-    st.stop()
 
 c1, c2 = st.columns([1, 3])
 with c1:

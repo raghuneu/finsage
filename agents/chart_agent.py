@@ -152,10 +152,13 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
                FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
         WHERE TICKER = '{ticker.upper()}'
-        ORDER BY FISCAL_YEAR, FISCAL_PERIOD
+          AND REPORTING_FREQUENCY = 'quarterly'
+        ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC
+        LIMIT 12
     """).to_pandas()
     df.columns = [c.lower() for c in df.columns]
-    return df
+    # Reverse so oldest quarter is first (chronological order for charting)
+    return df.iloc[::-1].reset_index(drop=True)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -960,7 +963,29 @@ def generate_single_chart(
             # ── Render chart ──────────────────────────────────
             if not execute_chart_code(code, df, iter_path):
                 logger.warning("Chart %s: %s render failed", chart_id, iter_tag)
-                if best_path:
+                if best_path and iteration == FIXED_REFINEMENT_ITERATIONS:
+                    # Final iteration failed — retry once with simplified prompt
+                    logger.info("Chart %s: retrying iter%d with simplified prompt",
+                                chart_id, iteration)
+                    simple_prompt = (
+                        f"{CHART_CODE_SYSTEM}\n\n"
+                        f"The previous code for this {ticker} {chart_id} chart works correctly. "
+                        f"Make only MINIMAL styling improvements. Do NOT restructure.\n"
+                        f"Working code:\n{prev_code}\n\n"
+                        f"{hard_constraints}"
+                    )
+                    retry_code = cortex_complete_with_timeout(session, simple_prompt)
+                    if retry_code and execute_chart_code(retry_code, df, iter_path):
+                        _shutil.copyfile(iter_path, final_path)
+                        best_path = final_path
+                        refinement_count = iteration
+                        prev_code = retry_code
+                        logger.info("Chart %s: simplified retry succeeded", chart_id)
+                    else:
+                        logger.warning("Chart %s: simplified retry also failed, keeping iter%d",
+                                       chart_id, iteration - 1)
+                    continue
+                elif best_path:
                     continue
                 else:
                     raise RuntimeError(f"Iteration {iteration} render failed (no prior version)")
@@ -1081,6 +1106,7 @@ def generate_charts(
     MIN_ROWS = {
         "margin_trend": 3,
         "balance_sheet": 3,
+        "sentiment": 5,
     }
 
     # ── 2. Precompute chart-ready data via data prep layer ────

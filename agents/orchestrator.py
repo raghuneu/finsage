@@ -50,8 +50,9 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
-# Known company names for cover page
-COMPANY_NAMES = {
+# In-memory company-name cache, seeded with well-known tickers.
+# resolve_company_name() populates this dynamically for unknown tickers.
+_COMPANY_NAME_CACHE = {
     "AAPL":  "Apple Inc.",
     "MSFT":  "Microsoft Corporation",
     "TSLA":  "Tesla Inc.",
@@ -63,6 +64,51 @@ COMPANY_NAMES = {
     "BAC":   "Bank of America Corp.",
     "GS":    "Goldman Sachs Group Inc.",
 }
+
+
+def resolve_company_name(ticker: str, session=None) -> str:
+    """Resolve a ticker to its full company name.
+
+    Resolution order:
+        1. In-memory cache
+        2. DIM_COMPANY table in Snowflake (if session provided)
+        3. yfinance ``shortName`` lookup
+        4. Return the ticker itself as a last resort
+    """
+    ticker = ticker.upper().strip()
+
+    # Method 1: cache
+    if ticker in _COMPANY_NAME_CACHE:
+        return _COMPANY_NAME_CACHE[ticker]
+
+    # Method 2: Snowflake DIM_COMPANY
+    if session is not None:
+        try:
+            rows = session.sql(
+                f"SELECT COMPANY_NAME FROM ANALYTICS.DIM_COMPANY WHERE TICKER = '{ticker}'"
+            ).collect()
+            if rows and rows[0]["COMPANY_NAME"]:
+                name = rows[0]["COMPANY_NAME"]
+                _COMPANY_NAME_CACHE[ticker] = name
+                logger.info("Resolved company name for %s from DIM_COMPANY: %s", ticker, name)
+                return name
+        except Exception as exc:
+            logger.debug("DIM_COMPANY lookup failed for %s: %s", ticker, exc)
+
+    # Method 3: yfinance
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+        name = info.get("shortName") or info.get("longName")
+        if name:
+            _COMPANY_NAME_CACHE[ticker] = name
+            logger.info("Resolved company name for %s from yfinance: %s", ticker, name)
+            return name
+    except Exception as exc:
+        logger.debug("yfinance lookup failed for %s: %s", ticker, exc)
+
+    # Fallback: return ticker as-is
+    return ticker
 
 
 def _first_failure_reason(chart: dict) -> str:
@@ -189,7 +235,7 @@ def stage_report(ticker: str, charts: list, analysis: dict,
     logger.info("━" * 50)
     logger.info("STAGE 4: PDF Report Generation")
     logger.info("━" * 50)
-    company_name = COMPANY_NAMES.get(ticker.upper(), ticker)
+    company_name = resolve_company_name(ticker)
     pdf_path = generate_report(
         ticker=ticker,
         charts=charts,
@@ -312,7 +358,7 @@ def generate_report_pipeline(
 
     print("\n" + "═" * 60)
     print(f"  FinSage CAVM Pipeline")
-    print(f"  Ticker: {ticker}  |  {COMPANY_NAMES.get(ticker, ticker)}")
+    print(f"  Ticker: {ticker}  |  {resolve_company_name(ticker)}")
     print(f"  Started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     if debug:
         print(f"  Mode: DEBUG (all chart iterations saved)")

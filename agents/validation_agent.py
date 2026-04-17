@@ -74,15 +74,68 @@ def check_data_summary_populated(chart: dict) -> tuple:
     return True, f"data_summary has {len(summary)} keys"
 
 
+def check_data_plausibility(chart: dict) -> tuple:
+    """
+    Check data_summary for implausible financial values that indicate
+    upstream data issues (e.g., margins > 100%, negative ratios that
+    should be positive).
+    """
+    summary = chart.get("data_summary", {})
+    if not summary:
+        return True, "No data_summary to validate"
+
+    warnings = []
+
+    # Margin checks — margins above 100% are almost always data errors
+    margin_keys = [
+        "operating_margin_pct", "net_margin_pct", "gross_margin_pct",
+        "operating_margin", "net_margin", "gross_margin", "profit_margin",
+    ]
+    for key in margin_keys:
+        val = summary.get(key)
+        if val is not None:
+            try:
+                v = float(val)
+                if abs(v) > 100:
+                    warnings.append(f"{key}={v:.1f}% exceeds 100%")
+            except (ValueError, TypeError):
+                pass
+
+    # Revenue should be positive
+    for key in ("latest_revenue", "revenue", "total_revenue"):
+        val = summary.get(key)
+        if val is not None:
+            try:
+                if float(val) < 0:
+                    warnings.append(f"{key} is negative ({val})")
+            except (ValueError, TypeError):
+                pass
+
+    # Debt-to-equity: extremely high values (> 50) are suspicious
+    for key in ("debt_to_equity_ratio", "debt_to_equity"):
+        val = summary.get(key)
+        if val is not None:
+            try:
+                if float(val) > 50:
+                    warnings.append(f"{key}={float(val):.1f} is unusually high")
+            except (ValueError, TypeError):
+                pass
+
+    if warnings:
+        return False, "Data plausibility warnings: " + "; ".join(warnings)
+    return True, "Data plausibility OK"
+
+
 def run_rule_checks(chart: dict) -> list:
     """
     Run all rule-based checks. Returns list of result dicts.
     """
     checks = [
-        ("file_exists",    check_file_exists),
-        ("file_size",      check_file_size),
-        ("dimensions",     check_image_dimensions),
-        ("data_summary",   check_data_summary_populated),
+        ("file_exists",        check_file_exists),
+        ("file_size",          check_file_size),
+        ("dimensions",         check_image_dimensions),
+        ("data_summary",       check_data_summary_populated),
+        ("data_plausibility",  check_data_plausibility),
     ]
 
     results = []
@@ -183,11 +236,16 @@ def validate_chart(session, chart: dict) -> dict:
 
     # Step 1: Rule-based checks
     rule_results = run_rule_checks(chart)
+    # Plausibility is advisory-only — don't block chart for source data anomalies
+    SOFT_CHECKS = {"data_plausibility"}
     for r in rule_results:
         validation_notes.append(r)
         if not r["passed"]:
-            all_passed = False
-            logger.warning("  ❌ Rule check failed [%s]: %s", r["check"], r["message"])
+            if r["check"] in SOFT_CHECKS:
+                logger.warning("  ⚠️  Soft check [%s]: %s", r["check"], r["message"])
+            else:
+                all_passed = False
+                logger.warning("  ❌ Rule check failed [%s]: %s", r["check"], r["message"])
         else:
             logger.info("  ✅ Rule check passed [%s]: %s", r["check"], r["message"])
 

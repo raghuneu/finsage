@@ -123,7 +123,28 @@ st.markdown('<hr class="fs-divider">', unsafe_allow_html=True)
 section_header("Run Pipeline", "Execute the data ingestion pipeline for selected tickers")
 
 with st.expander("Pipeline Controls", expanded=False):
-    sel = st.multiselect("Tickers", tickers, default=[ticker] if ticker in tickers else tickers[:1])
+    st.markdown(
+        '<div style="color:#6b7280;font-size:0.8rem;margin-bottom:8px">'
+        'Enter any ticker symbols. Preconfigured tickers are pre-filled below.</div>',
+        unsafe_allow_html=True,
+    )
+    custom_tickers = st.text_input(
+        "Tickers (comma-separated)",
+        value=ticker,
+        placeholder="e.g. AAPL, NVDA, AMZN",
+    )
+    sel = [t.strip().upper() for t in custom_tickers.split(",") if t.strip()]
+
+    # Quick-add buttons for preconfigured tickers
+    if tickers:
+        quick_cols = st.columns(min(len(tickers), 5))
+        for i, t in enumerate(tickers[:5]):
+            with quick_cols[i]:
+                if st.button(f"+ {t}", key=f"pipe_add_{t}", use_container_width=True):
+                    if t not in sel:
+                        sel.append(t)
+                    st.session_state["_pipe_tickers"] = ", ".join(sel)
+                    st.rerun()
 
     c1, c2, c3, c4 = st.columns(4)
     ls = c1.checkbox("Stocks", True)

@@ -26,6 +26,40 @@ WITH base AS (
     FROM {{ ref('stg_sec_filings') }}
 ),
 
+-- Deduplicate: 10-Q filings report both a current-period value and a
+-- prior-year comparison value for the same concept+fiscal_period.
+-- Strategy differs by concept type:
+--   • Income-statement / flow items → keep the SMALLEST value
+--     (standalone quarter, not cumulative YTD).
+--   • Balance-sheet / point-in-time items → keep the LATEST period_end
+--     (current snapshot, not prior-year comparison).
+deduped AS (
+    SELECT *
+    FROM (
+        SELECT
+            base.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY ticker, cik, concept, fiscal_year, fiscal_period
+                ORDER BY
+                    CASE
+                        WHEN concept IN (
+                            'Assets', 'Liabilities', 'StockholdersEquity',
+                            'CashAndCashEquivalentsAtCarryingValue'
+                        ) THEN period_end           -- balance sheet: latest snapshot
+                    END DESC,
+                    CASE
+                        WHEN concept NOT IN (
+                            'Assets', 'Liabilities', 'StockholdersEquity',
+                            'CashAndCashEquivalentsAtCarryingValue'
+                        ) THEN ABS(value)           -- income stmt: smallest value
+                    END ASC,
+                    filed_date DESC
+            ) AS _rn
+        FROM base
+    )
+    WHERE _rn = 1
+),
+
 -- Pivot: one row per ticker/period, each XBRL concept becomes a column
 pivoted AS (
     SELECT
@@ -70,7 +104,7 @@ pivoted AS (
         MAX(form_type)                              AS form_type,
         MAX(period_end)                             AS period_end
 
-    FROM base
+    FROM deduped
     GROUP BY ticker, cik, fiscal_year, fiscal_period, reporting_frequency
 ),
 

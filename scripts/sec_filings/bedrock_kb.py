@@ -44,16 +44,20 @@ class BedrockKB:
 
         logger.info("BedrockKB initialized: kb_id=%s, model=%s", self.kb_id, self.model_id)
 
-    def retrieve(self, query, ticker=None, max_results=5):
+    def retrieve(self, query: str, ticker: str = None, max_results: int = 5) -> list:
         """Retrieve relevant text chunks from the Knowledge Base."""
         # Prepend ticker to query for relevance filtering
         search_query = f"{ticker.upper()} {query}" if ticker else query
+
+        # Request extra results when filtering by ticker, since some chunks
+        # may belong to other companies and will be dropped.
+        fetch_count = max_results * 3 if ticker else max_results
 
         response = self.client.retrieve(
             knowledgeBaseId=self.kb_id,
             retrievalQuery={"text": search_query},
             retrievalConfiguration={
-                "vectorSearchConfiguration": {"numberOfResults": max_results}
+                "vectorSearchConfiguration": {"numberOfResults": fetch_count}
             },
         )
 
@@ -80,6 +84,17 @@ class BedrockKB:
                 "ticker": parsed_ticker,
                 "section": section,
             })
+
+        # Post-retrieval ticker filter: drop chunks from other companies
+        if ticker:
+            target = ticker.upper()
+            before = len(chunks)
+            chunks = [c for c in chunks if not c["ticker"] or c["ticker"].upper() == target]
+            chunks = chunks[:max_results]
+            if before != len(chunks):
+                logger.info(
+                    "Ticker filter: kept %d/%d chunks for %s", len(chunks), before, target
+                )
 
         logger.info("Retrieved %d chunks for: '%s'", len(chunks), search_query[:50])
         return chunks

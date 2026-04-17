@@ -40,6 +40,77 @@ with col_t:
             st.error(f"Invalid ticker: must be 1-10 uppercase letters.")
             st.stop()
 
+# ── Data readiness check ──────────────────────────────────
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from utils.data_readiness import check_data_readiness
+
+readiness = check_data_readiness(session, ticker)
+
+if readiness["ready"]:
+    st.markdown(
+        f'<div class="fs-card" style="border-left:3px solid #22c55e">'
+        f'<strong>Data Ready</strong> — All data sources available for {ticker}. '
+        f'Stock: {readiness["counts"]["stock"]}, '
+        f'Fundamentals: {readiness["counts"]["fundamentals"]}, '
+        f'News: {readiness["counts"]["news"]}, '
+        f'SEC: {readiness["counts"]["sec"]}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+elif readiness["min_viable"]:
+    st.markdown(
+        f'<div class="fs-card" style="border-left:3px solid #f59e0b">'
+        f'<strong>Partial Data</strong> — Missing: {", ".join(readiness["missing"])}. '
+        f'Reports will be generated with available data. '
+        f'Click "Load Missing Data" to fetch missing sources.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        f'<div class="fs-card" style="border-left:3px solid #ef4444">'
+        f'<strong>Data Not Available</strong> — Required data missing for {ticker}: '
+        f'{", ".join(readiness["missing"])}. Load data before generating a report.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+if not readiness["ready"]:
+    if st.button("Load Missing Data", type="secondary"):
+        from utils.on_demand_loader import ensure_data_for_ticker
+
+        progress_bar = st.progress(0, text="Starting data load...")
+        stage_progress = {
+            "checking": 0.1, "loading": 0.3, "dbt": 0.7,
+            "verifying": 0.9, "done": 1.0, "ready": 1.0,
+        }
+
+        def _update_progress(stage, detail=""):
+            pct = stage_progress.get(stage, 0.5)
+            progress_bar.progress(pct, text=detail or stage.capitalize())
+
+        with st.spinner(f"Loading data for {ticker}..."):
+            load_result = ensure_data_for_ticker(
+                ticker=ticker,
+                session=session,
+                progress_callback=_update_progress,
+            )
+
+        final = load_result["readiness"]
+        if final["ready"]:
+            st.success(f"All data loaded for {ticker}.")
+        elif final["min_viable"]:
+            st.warning(f"Partial data loaded. Still missing: {', '.join(final['missing'])}")
+        else:
+            st.error(f"Could not load required data for {ticker}. Missing: {', '.join(final['missing'])}")
+            st.stop()
+
+        st.rerun()
+
+if not readiness["min_viable"]:
+    st.info("Load data above before generating a report.")
+    st.stop()
+
 # ── Report type selector ────────────────────────────────────
 st.markdown("")
 report_type = st.radio(

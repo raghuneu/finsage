@@ -445,6 +445,7 @@ def get_filing_text(session, ticker: str, form_type: str = None,
             "period_of_report": str(row["PERIOD_OF_REPORT"]),
             "company_name": row["COMPANY_NAME"],
             "quality_score": row["DATA_QUALITY_SCORE"],
+            "source": "documents",
         }
         if section in ("mda", "both") and "MDA_TEXT" in row.as_dict():
             filing["mda_text"] = row["MDA_TEXT"] or ""
@@ -455,7 +456,54 @@ def get_filing_text(session, ticker: str, form_type: str = None,
 
         filings.append(filing)
 
-    return filings
+    if filings:
+        return filings
+
+    # ── Analytics-only fallback ──────────────────────────────────
+    # No extracted documents exist for this ticker. Build a minimal
+    # filing dict from the analytics layer so downstream analysis
+    # functions can still produce useful output using quantitative
+    # data alone.
+    logger.info("No extracted documents for %s — trying analytics-only fallback", ticker.upper())
+    fallback_query = f"""
+    SELECT
+        s.TICKER,
+        s.FORM_TYPE,
+        s.FISCAL_YEAR,
+        s.FISCAL_PERIOD,
+        c.CIK
+    FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY s
+    LEFT JOIN ANALYTICS.DIM_COMPANY c ON s.TICKER = c.TICKER
+    WHERE s.TICKER = '{ticker.upper()}'
+    ORDER BY s.FISCAL_YEAR DESC, s.FISCAL_PERIOD DESC
+    LIMIT 1
+    """
+    try:
+        fb_rows = session.sql(fallback_query).collect()
+    except Exception as e:
+        logger.warning("Analytics fallback query failed for %s: %s", ticker, e)
+        return []
+
+    if not fb_rows:
+        return []
+
+    fb = fb_rows[0]
+    fallback_filing = {
+        "filing_id": f"analytics_{fb['TICKER']}_{fb['FISCAL_YEAR']}_{fb['FISCAL_PERIOD']}",
+        "ticker": fb["TICKER"],
+        "form_type": fb["FORM_TYPE"] or form_type or "10-K",
+        "filing_date": f"FY{fb['FISCAL_YEAR']} {fb['FISCAL_PERIOD']}",
+        "period_of_report": f"FY{fb['FISCAL_YEAR']} {fb['FISCAL_PERIOD']}",
+        "company_name": fb["TICKER"],  # best available; analytics prompt adds detail
+        "quality_score": None,
+        "source": "analytics_only",
+        "mda_text": "",
+        "mda_word_count": 0,
+        "risk_factors_text": "",
+        "risk_word_count": 0,
+    }
+    logger.info("Analytics-only fallback created for %s (FY%s %s)", fb["TICKER"], fb["FISCAL_YEAR"], fb["FISCAL_PERIOD"])
+    return [fallback_filing]
 
 
 # ──────────────────────────────────────────────────────────────
@@ -469,14 +517,50 @@ def summarize_filing(session, ticker: str, form_type: str = "10-K") -> str:
         return f"No extracted filings found for {ticker} {form_type}"
 
     filing = filings[0]
-    mda = filing.get("mda_text", "")[:15000]
-    risk = filing.get("risk_factors_text", "")[:8000]
+    is_analytics_only = filing.get("source") == "analytics_only"
 
-    # NEW: Get ALL analytics data
+    # Get ALL analytics data (used in both paths)
     intel = get_company_intelligence(session, ticker)
     analytics = format_analytics_context(intel)
 
-    prompt = f"""You are a senior financial analyst at a top-tier investment bank. Generate a
+    if is_analytics_only:
+        # ── Analytics-only prompt (no filing text available) ──────
+        prompt = f"""You are a senior financial analyst. Generate a quantitative research summary
+for {filing['ticker']} based SOLELY on analytics data from our data pipeline.
+
+NOTE: No extracted SEC filing text (MD&A, Risk Factors) is available for this ticker.
+Your analysis must rely entirely on the quantitative data below.
+
+QUANTITATIVE DATA:
+{analytics}
+
+Generate a professional research summary covering:
+
+1. COMPANY SNAPSHOT — Market cap category, current price vs 52-week range, trend signal,
+   and financial health rating.
+
+2. FINANCIAL PERFORMANCE — Revenue growth, margins, ROE, EPS growth, and fundamental signal.
+   Identify strengths and weaknesses from the numbers alone.
+
+3. MARKET SIGNALS — Stock trend signal combined with news sentiment. Is the market
+   confirming or diverging from fundamentals?
+
+4. KEY RISKS (data-derived) — Identify risks from the quantitative data:
+   - High debt-to-equity → leverage risk
+   - Declining margins → profitability risk
+   - Negative revenue growth → demand risk
+   - High volatility → market risk
+
+5. OUTLOOK & ASSESSMENT — Synthesize fundamental signal + trend signal + sentiment label +
+   financial health into a coherent forward-looking view.
+
+CRITICAL: Reference SPECIFIC numbers. This is a data-only analysis — do not fabricate
+qualitative claims or pretend to have filing text. Keep under 600 words."""
+    else:
+        mda = filing.get("mda_text", "")[:15000]
+        risk = filing.get("risk_factors_text", "")[:8000]
+
+        prompt = f"""You are a senior financial analyst at a top-tier investment bank. Generate a
 comprehensive research summary for {filing['company_name']} ({filing['ticker']}).
 
 You have TWO types of data:
@@ -529,13 +613,46 @@ def analyze_risks(session, ticker: str, form_type: str = "10-K") -> str:
         return f"No risk factors found for {ticker}"
 
     filing = filings[0]
-    risk = filing.get("risk_factors_text", "")[:25000]
+    is_analytics_only = filing.get("source") == "analytics_only"
 
-    # NEW: Get analytics data for risk context
+    # Get analytics data for risk context
     intel = get_company_intelligence(session, ticker)
     analytics = format_analytics_context(intel)
 
-    prompt = f"""You are a risk analyst reviewing {filing['company_name']}'s ({filing['ticker']})
+    if is_analytics_only:
+        # ── Analytics-only risk assessment ───────────────────────
+        prompt = f"""You are a risk analyst assessing {filing['ticker']} based SOLELY on
+quantitative data from our analytics pipeline.
+
+NOTE: No extracted SEC filing risk factors text is available for this ticker.
+Derive risk assessment entirely from the numbers.
+
+QUANTITATIVE DATA:
+{analytics}
+
+Provide a data-derived risk analysis:
+
+1. RISK CATEGORIES — Identify risks from the data:
+   - Financial risk: debt-to-equity ratio, cash position, margin trends
+   - Market risk: volatility, 52-week price position, trend signal
+   - Growth risk: revenue growth direction, EPS growth, fundamental signal
+   - Sentiment risk: news sentiment label, sentiment trend
+
+2. TOP 5 DATA-DERIVED RISKS — Rank by quantitative severity. For each,
+   cite the specific metric and threshold that flags the concern.
+
+3. SENTIMENT CROSS-CHECK — What do recent news headlines and sentiment
+   scores tell us about market perception of risk?
+
+4. RISK SCORE — Rate overall risk as LOW / MODERATE / HIGH / CRITICAL
+   based purely on the quantitative evidence.
+
+Be specific with numbers. Do not fabricate qualitative filing text.
+Keep under 500 words."""
+    else:
+        risk = filing.get("risk_factors_text", "")[:25000]
+
+        prompt = f"""You are a risk analyst reviewing {filing['company_name']}'s ({filing['ticker']})
 {filing['form_type']} filing from {filing['filing_date']}.
 
 You have quantitative data to WEIGHT each risk by its actual impact:
@@ -580,13 +697,46 @@ def analyze_mda(session, ticker: str, form_type: str = "10-K") -> str:
         return f"No MD&A found for {ticker}"
 
     filing = filings[0]
-    mda = filing.get("mda_text", "")[:25000]
+    is_analytics_only = filing.get("source") == "analytics_only"
 
-    # NEW: Get analytics data
+    # Get analytics data
     intel = get_company_intelligence(session, ticker)
     analytics = format_analytics_context(intel)
 
-    prompt = f"""You are a senior equity research analyst reviewing {filing['company_name']}'s ({filing['ticker']})
+    if is_analytics_only:
+        # ── Analytics-only performance discussion ────────────────
+        prompt = f"""You are a senior equity research analyst producing a performance discussion
+for {filing['ticker']} based SOLELY on quantitative data from our analytics pipeline.
+
+NOTE: No extracted MD&A text from SEC filings is available for this ticker.
+Produce an independent performance assessment from the numbers.
+
+QUANTITATIVE DATA:
+{analytics}
+
+Provide a data-driven performance analysis:
+
+1. REVENUE ANALYSIS — Analyze revenue_growth_yoy_pct and revenue_growth_qoq_pct.
+   Is growth accelerating, stable, or decelerating?
+
+2. PROFITABILITY — Assess net_margin_pct, operating_margin_pct, and return_on_equity_pct.
+   How do margins compare to the fundamental signal?
+
+3. BALANCE SHEET HEALTH — Evaluate debt_to_equity_ratio, cash_and_equivalents,
+   and book_value. What is the financial health rating and is it justified?
+
+4. TREND ASSESSMENT — Combine fundamental_signal + trend_signal + sentiment data.
+   Are these signals aligned or conflicting?
+
+5. FORWARD OUTLOOK — Based on growth trajectory, margin trends, and market signals,
+   what is the likely near-term direction?
+
+Be specific with numbers. Do not fabricate management claims or filing text.
+Keep under 500 words."""
+    else:
+        mda = filing.get("mda_text", "")[:25000]
+
+        prompt = f"""You are a senior equity research analyst reviewing {filing['company_name']}'s ({filing['ticker']})
 {filing['form_type']} MD&A section from {filing['filing_date']}.
 
 CRITICAL: You have both management's narrative AND independent quantitative data.
@@ -631,6 +781,37 @@ def compare_filings(session, ticker: str) -> str:
     filings = get_filing_text(session, ticker, form_type=None, section="both", limit=2)
 
     if len(filings) < 2:
+        # If we have exactly 1 analytics-only filing, produce a trajectory
+        # analysis from the quantitative data instead of an error.
+        if len(filings) == 1 and filings[0].get("source") == "analytics_only":
+            filing = filings[0]
+            intel = get_company_intelligence(session, ticker)
+            analytics = format_analytics_context(intel)
+            prompt = f"""You are a financial analyst producing a trajectory analysis for {filing['ticker']}
+based SOLELY on quantitative data. No multi-period filing text is available for comparison.
+
+QUANTITATIVE DATA:
+{analytics}
+
+Provide a trajectory analysis:
+
+1. CURRENT STATE — Summarize the company's financial position using key metrics:
+   revenue, margins, growth rates, debt-to-equity, and financial health rating.
+
+2. GROWTH TRAJECTORY — Is revenue accelerating or decelerating? Are margins expanding
+   or compressing? Use YoY and QoQ growth rates to assess direction.
+
+3. MARKET PERCEPTION — What do the trend signal, sentiment label, and sentiment trend
+   tell us about how the market views this company's trajectory?
+
+4. RISK INDICATORS — Flag any metrics that suggest deterioration: negative growth,
+   declining margins, rising leverage, bearish signals.
+
+5. VERDICT — Based on the quantitative signals alone, is the company improving,
+   stable, or deteriorating?
+
+Be specific with numbers. Keep under 500 words."""
+            return cortex_complete(session, prompt)
         return f"Need at least 2 filings for comparison. Found {len(filings)} for {ticker}"
 
     newer = filings[0]
@@ -689,14 +870,32 @@ def ask_question(session, ticker: str, question: str,
         return f"No filings found for {ticker}"
 
     filing = filings[0]
-    mda = filing.get("mda_text", "")[:15000]
-    risk = filing.get("risk_factors_text", "")[:8000]
+    is_analytics_only = filing.get("source") == "analytics_only"
 
-    # NEW: Get analytics data
+    # Get analytics data
     intel = get_company_intelligence(session, ticker)
     analytics = format_analytics_context(intel)
 
-    prompt = f"""You are a financial analyst answering questions about {filing['company_name']}'s ({filing['ticker']}).
+    if is_analytics_only:
+        prompt = f"""You are a financial analyst answering questions about {filing['ticker']}.
+
+NOTE: No extracted SEC filing text is available. Answer using ONLY the quantitative
+analytics data below. If the question requires filing text (e.g., specific management
+quotes), explain that filing text is not available and provide what you can from the data.
+
+QUANTITATIVE DATA:
+{analytics}
+
+QUESTION: {question}
+
+Answer using the quantitative data. Be specific with numbers.
+If the answer cannot be determined from the data, say so clearly.
+Keep your answer under 400 words."""
+    else:
+        mda = filing.get("mda_text", "")[:15000]
+        risk = filing.get("risk_factors_text", "")[:8000]
+
+        prompt = f"""You are a financial analyst answering questions about {filing['company_name']}'s ({filing['ticker']}).
 
 You have access to TWO data sources:
 1. Quantitative analytics data (numbers, metrics, computed signals)
@@ -738,13 +937,56 @@ def full_report(session, ticker: str, form_type: str = "10-K") -> str:
         return f"No extracted filings found for {ticker} {form_type}"
 
     filing = filings[0]
-    mda = filing.get("mda_text", "")[:15000]
-    risk = filing.get("risk_factors_text", "")[:8000]
+    is_analytics_only = filing.get("source") == "analytics_only"
 
     intel = get_company_intelligence(session, ticker)
     analytics = format_analytics_context(intel)
 
-    prompt = f"""You are the lead analyst at a top investment research firm. Generate a
+    if is_analytics_only:
+        prompt = f"""You are the lead analyst at a top investment research firm. Generate a
+comprehensive quantitative equity research report for {filing['ticker']}.
+
+NOTE: No extracted SEC filing text (MD&A, Risk Factors) is available for this ticker.
+This report is based ENTIRELY on quantitative analytics data.
+
+═══ QUANTITATIVE DATA FROM ANALYTICS PIPELINE ═══
+{analytics}
+
+═══ REPORT STRUCTURE ═══
+
+Generate the following sections:
+
+## 1. EXECUTIVE SUMMARY (100 words)
+One-paragraph snapshot: current state and key takeaway.
+Include: market cap category, financial health rating, trend signal, sentiment label.
+
+## 2. FINANCIAL PERFORMANCE (150 words)
+Revenue and profitability analysis with specific numbers.
+Include: revenue growth YoY, net margin, operating margin, ROE.
+
+## 3. STOCK & MARKET ANALYSIS (100 words)
+Current price context: position in 52-week range, moving averages, volatility,
+trend signal. How does the market price reflect (or diverge from) fundamentals?
+
+## 4. NEWS SENTIMENT ANALYSIS (100 words)
+Sentiment score, trend direction, key themes from recent headlines.
+
+## 5. RISK ASSESSMENT (150 words)
+Top 3-5 risks derived from the quantitative data (leverage, margin compression,
+growth deceleration, volatility, sentiment deterioration).
+Overall risk rating: LOW / MODERATE / HIGH / CRITICAL.
+
+## 6. INVESTMENT OUTLOOK (100 words)
+Synthesis of all signals: fundamental_signal + trend_signal + sentiment_label +
+financial_health. Forward-looking view with data-backed reasoning.
+
+CRITICAL: Every section MUST cite specific numbers. Do not fabricate filing text
+or management quotes. Total length: ~700 words."""
+    else:
+        mda = filing.get("mda_text", "")[:15000]
+        risk = filing.get("risk_factors_text", "")[:8000]
+
+        prompt = f"""You are the lead analyst at a top investment research firm. Generate a
 comprehensive equity research report for {filing['company_name']} ({filing['ticker']}).
 
 This report must integrate BOTH quantitative analytics and qualitative SEC filing analysis.
