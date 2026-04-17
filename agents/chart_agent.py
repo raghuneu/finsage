@@ -194,8 +194,8 @@ def build_revenue_summary(df: pd.DataFrame) -> dict:
     yoy_ni = latest.get("net_income_growth_yoy_pct")
     qoq_ni = latest.get("net_income_growth_qoq_pct")
     return {
-        "latest_revenue_growth_yoy": round(float(yoy_rev) if pd.notna(yoy_rev) else (float(qoq_rev) if pd.notna(qoq_rev) else 0), 1),
-        "latest_net_income_growth_yoy": round(float(yoy_ni) if pd.notna(yoy_ni) else (float(qoq_ni) if pd.notna(qoq_ni) else 0), 1),
+        "latest_revenue_growth_yoy": round(float(yoy_rev), 1) if pd.notna(yoy_rev) else (round(float(qoq_rev), 1) if pd.notna(qoq_rev) else None),
+        "latest_net_income_growth_yoy": round(float(yoy_ni), 1) if pd.notna(yoy_ni) else (round(float(qoq_ni), 1) if pd.notna(qoq_ni) else None),
         "growth_type": "YoY" if pd.notna(yoy_rev) else "QoQ",
         "fundamental_signal": str(latest["fundamental_signal"]),
     }
@@ -204,9 +204,9 @@ def build_revenue_summary(df: pd.DataFrame) -> dict:
 def build_eps_summary(df: pd.DataFrame) -> dict:
     latest = df.iloc[-1]
     return {
-        "latest_eps": round(float(latest["eps"]) if pd.notna(latest["eps"]) else 0, 2),
-        "eps_growth_yoy_pct": round(float(latest["eps_growth_yoy_pct"]) if pd.notna(latest["eps_growth_yoy_pct"]) else 0, 1),
-        "eps_growth_qoq_pct": round(float(latest["eps_growth_qoq_pct"]) if pd.notna(latest["eps_growth_qoq_pct"]) else 0, 1),
+        "latest_eps": round(float(latest["eps"]), 2) if pd.notna(latest["eps"]) else None,
+        "eps_growth_yoy_pct": round(float(latest["eps_growth_yoy_pct"]), 1) if pd.notna(latest["eps_growth_yoy_pct"]) else None,
+        "eps_growth_qoq_pct": round(float(latest["eps_growth_qoq_pct"]), 1) if pd.notna(latest["eps_growth_qoq_pct"]) else None,
     }
 
 
@@ -227,11 +227,14 @@ def build_financial_health_summary(df: pd.DataFrame) -> dict:
         op_vals = df["operating_margin_pct"].dropna()
         if not op_vals.empty:
             op_margin = round(float(op_vals.iloc[-1]), 1)
+    raw_rev = float(latest["total_revenue"]) if pd.notna(latest.get("total_revenue")) else None
+    raw_net = float(latest["net_margin_pct"]) if pd.notna(latest.get("net_margin_pct")) else None
+    raw_de = float(latest["debt_to_equity_ratio"]) if pd.notna(latest.get("debt_to_equity_ratio")) else None
     return {
-        "total_revenue": float(latest["total_revenue"]) if pd.notna(latest.get("total_revenue")) else 0,
-        "net_margin_pct": round(float(latest["net_margin_pct"]) if pd.notna(latest.get("net_margin_pct")) else 0, 1),
+        "total_revenue": raw_rev,
+        "net_margin_pct": round(raw_net, 1) if raw_net is not None else None,
         "operating_margin_pct": op_margin,
-        "debt_to_equity_ratio": round(float(latest["debt_to_equity_ratio"]) if pd.notna(latest.get("debt_to_equity_ratio")) else 0, 2),
+        "debt_to_equity_ratio": round(raw_de, 2) if raw_de is not None else None,
         "financial_health": str(latest.get("financial_health", "FAIR")),
     }
 
@@ -259,14 +262,14 @@ def build_margin_trend_summary(df: pd.DataFrame) -> dict:
 def build_balance_sheet_summary(df: pd.DataFrame) -> dict:
     """Build data summary for balance sheet composition chart (SEC data)."""
     latest = df.iloc[-1]
-    total_assets = float(latest["total_assets"]) if pd.notna(latest.get("total_assets")) else 0
-    total_liab = float(latest["total_liabilities"]) if pd.notna(latest.get("total_liabilities")) else 0
-    equity = float(latest["stockholders_equity"]) if pd.notna(latest.get("stockholders_equity")) else 0
-    equity_pct = round(equity / total_assets * 100, 1) if total_assets else 0
+    total_assets = float(latest["total_assets"]) if pd.notna(latest.get("total_assets")) else None
+    total_liab = float(latest["total_liabilities"]) if pd.notna(latest.get("total_liabilities")) else None
+    equity = float(latest["stockholders_equity"]) if pd.notna(latest.get("stockholders_equity")) else None
+    equity_pct = round(equity / total_assets * 100, 1) if (total_assets and equity) else None
     return {
-        "total_assets_b": round(total_assets / 1e9, 1),
-        "total_liabilities_b": round(total_liab / 1e9, 1),
-        "stockholders_equity_b": round(equity / 1e9, 1),
+        "total_assets_b": round(total_assets / 1e9, 1) if total_assets is not None else None,
+        "total_liabilities_b": round(total_liab / 1e9, 1) if total_liab is not None else None,
+        "stockholders_equity_b": round(equity / 1e9, 1) if equity is not None else None,
         "equity_pct": equity_pct,
         "num_quarters": len(df),
     }
@@ -524,6 +527,7 @@ plt.setp(ax1.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=9)
         ),
         "fallback_code": """
 from matplotlib.ticker import FormatStrFormatter
+import numpy as np
 fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
@@ -531,23 +535,32 @@ growth_col = 'revenue_growth_yoy_pct'
 ni_col = 'net_income_growth_yoy_pct'
 x = list(range(len(df)))
 width = 0.35
-rev_vals = df[growth_col].fillna(0)
-ni_vals = df[ni_col].fillna(0)
-rev_colors = ['#00b4d8' if v >= 0 else '#ef476f' for v in rev_vals]
-inc_colors = ['#06d6a0' if v >= 0 else '#ef476f' for v in ni_vals]
-bars1 = ax.bar([i - width/2 for i in x], rev_vals, width, color=rev_colors, alpha=0.85,
+rev_vals = df[growth_col].tolist()
+ni_vals = df[ni_col].tolist()
+# Only plot bars where data exists (not None/NaN)
+rev_x = [i for i, v in zip(x, rev_vals) if v is not None and not (isinstance(v, float) and np.isnan(v))]
+rev_y = [v for v in rev_vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+ni_x = [i for i, v in zip(x, ni_vals) if v is not None and not (isinstance(v, float) and np.isnan(v))]
+ni_y = [v for v in ni_vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+rev_colors = ['#00b4d8' if v >= 0 else '#ef476f' for v in rev_y]
+inc_colors = ['#06d6a0' if v >= 0 else '#ef476f' for v in ni_y]
+bars1 = ax.bar([i - width/2 for i in rev_x], rev_y, width, color=rev_colors, alpha=0.85,
                label='Revenue Growth YoY %')
-bars2 = ax.bar([i + width/2 for i in x], ni_vals, width, color=inc_colors, alpha=0.85,
+bars2 = ax.bar([i + width/2 for i in ni_x], ni_y, width, color=inc_colors, alpha=0.85,
                label='Net Income Growth YoY %')
 ax.axhline(y=0, color='black', linewidth=0.8, linestyle='-')
-for bar, v in zip(bars1, rev_vals):
+for bar, v in zip(bars1, rev_y):
     ax.annotate(f'{v:.1f}%', (bar.get_x() + bar.get_width()/2, v),
                 textcoords='offset points', xytext=(0, 4 if v >= 0 else -12),
                 ha='center', fontsize=8, color='#0f172a')
-for bar, v in zip(bars2, ni_vals):
+for bar, v in zip(bars2, ni_y):
     ax.annotate(f'{v:.1f}%', (bar.get_x() + bar.get_width()/2, v),
                 textcoords='offset points', xytext=(0, 4 if v >= 0 else -12),
                 ha='center', fontsize=8, color='#0f172a')
+# Mark quarters with no data
+for i, (rv, nv) in enumerate(zip(rev_vals, ni_vals)):
+    if (rv is None or (isinstance(rv, float) and np.isnan(rv))):
+        ax.annotate('N/A', (i, 0), ha='center', fontsize=7, color='#999999', style='italic')
 ax.set_xticks(x)
 ax.set_xticklabels(df['fiscal_quarter'].tolist(), rotation=30, fontsize=9, ha='right')
 ax.set_title('Revenue & Net Income Growth (YoY %)', fontsize=14, fontweight='bold')
@@ -575,21 +588,28 @@ ax.legend(fontsize=9, framealpha=0.9, loc='upper left')
             f"EPS in USD, growth ALREADY in %. Do NOT transform. Fix the critique issues."
         ),
         "fallback_code": """
+import numpy as np
 fig, ax1 = plt.subplots(figsize=(14, 6))
 ax1.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 ax2 = ax1.twinx()
-x = range(len(df))
-growth_colors = ['#06d6a0' if v >= 0 else '#ef476f'
-                 for v in df['eps_growth_yoy_pct'].fillna(0)]
-ax2.bar(x, df['eps_growth_yoy_pct'].fillna(0), color=growth_colors,
-        alpha=0.4, label='EPS Growth YoY %')
-ax1.plot(list(x), df['eps'].fillna(0), color='#00b4d8', linewidth=2.5,
+x = list(range(len(df)))
+eps_vals = df['eps'].tolist()
+growth_vals = df['eps_growth_yoy_pct'].tolist()
+# Filter valid growth values for bars
+g_x = [i for i, v in zip(x, growth_vals) if v is not None and not (isinstance(v, float) and np.isnan(v))]
+g_y = [v for v in growth_vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+growth_colors = ['#06d6a0' if v >= 0 else '#ef476f' for v in g_y]
+ax2.bar(g_x, g_y, color=growth_colors, alpha=0.4, label='EPS Growth YoY %')
+# Filter valid EPS values for line
+e_x = [i for i, v in zip(x, eps_vals) if v is not None and not (isinstance(v, float) and np.isnan(v))]
+e_y = [v for v in eps_vals if v is not None and not (isinstance(v, float) and np.isnan(v))]
+ax1.plot(e_x, e_y, color='#00b4d8', linewidth=2.5,
          marker='o', markersize=8, label='EPS', zorder=5)
-for i, (xi, yi) in enumerate(zip(x, df['eps'].fillna(0))):
+for xi, yi in zip(e_x, e_y):
     ax1.annotate(f'${yi:.2f}', (xi, yi), textcoords="offset points",
                  xytext=(0, 10), ha='center', fontsize=8)
-ax1.set_xticks(list(x))
+ax1.set_xticks(x)
 ax1.set_xticklabels(df['fiscal_quarter'].tolist(), rotation=30, fontsize=9)
 ax1.set_title('Earnings Per Share (EPS) Trend', fontsize=14, fontweight='bold')
 ax1.set_ylabel('EPS (USD)', fontsize=11)
@@ -671,6 +691,7 @@ plt.xticks(rotation=30, ha='right', fontsize=9)
             f"Margins ALREADY in %. Debt/equity ALREADY a ratio. Do NOT transform."
         ),
         "fallback_code": """
+import numpy as np
 fig, ax1 = plt.subplots(figsize=(14, 6))
 ax1.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
@@ -678,22 +699,31 @@ ax2 = ax1.twinx()
 labels = df['fiscal_period'].tolist()
 x = range(len(df))
 width = 0.35
-ax1.bar([i - width/2 for i in x], df['net_margin_pct'].fillna(0),
-        width, color='#00b4d8', alpha=0.8, label='Net Margin %')
-if 'operating_margin_pct' in df.columns:
-    ax1.bar([i + width/2 for i in x], df['operating_margin_pct'].fillna(0),
-            width, color='#06d6a0', alpha=0.8, label='Operating Margin %')
-if df['debt_to_equity_ratio'].notna().any():
-    ax2.plot(list(x), df['debt_to_equity_ratio'].fillna(0),
-             color='#ef476f', linewidth=2, marker='D', markersize=6,
+net_m = df['net_margin_pct'].fillna(np.nan)
+op_m = df['operating_margin_pct'].fillna(np.nan) if 'operating_margin_pct' in df.columns else pd.Series([np.nan]*len(df))
+de_r = df['debt_to_equity_ratio'].fillna(np.nan) if df['debt_to_equity_ratio'].notna().any() else pd.Series([np.nan]*len(df))
+# Plot margin bars only where data exists
+for i, v in enumerate(net_m):
+    if pd.notna(v):
+        ax1.bar(i - width/2, v, width, color='#00b4d8', alpha=0.8,
+                label='Net Margin %' if i == next((j for j, val in enumerate(net_m) if pd.notna(val)), -1) else '')
+for i, v in enumerate(op_m):
+    if pd.notna(v):
+        ax1.bar(i + width/2, v, width, color='#06d6a0', alpha=0.8,
+                label='Operating Margin %' if i == next((j for j, val in enumerate(op_m) if pd.notna(val)), -1) else '')
+# D/E line — only plot valid points
+de_valid_x = [i for i, v in enumerate(de_r) if pd.notna(v)]
+de_valid_y = [v for v in de_r if pd.notna(v)]
+if de_valid_x:
+    ax2.plot(de_valid_x, de_valid_y, color='#ef476f', linewidth=2, marker='D', markersize=6,
              label='Debt/Equity Ratio')
-for i, v in enumerate(df['net_margin_pct'].fillna(0)):
-    if v != 0:
+for i, v in enumerate(net_m):
+    if pd.notna(v) and v != 0:
         ax1.annotate(f'{v:.1f}%', (i - width/2, v), textcoords='offset points',
                      xytext=(0, 5), ha='center', fontsize=8, color='#00b4d8')
 ax1.set_xticks(list(x))
 ax1.set_xticklabels(labels, rotation=30, fontsize=9, ha='right')
-ax1.set_title('Financial Health — Margins & Leverage', fontsize=14, fontweight='bold')
+ax1.set_title('Financial Health \u2014 Margins & Leverage', fontsize=14, fontweight='bold')
 ax1.set_ylabel('Margin %', fontsize=11)
 ax2.set_ylabel('Debt/Equity Ratio', fontsize=11)
 ax1.grid(True, axis='y', color='#e0e0e0', alpha=0.7, linestyle='--')
@@ -721,22 +751,23 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9)
             f"Margins ALREADY in %. Do NOT multiply by 100. Fix the critique issues."
         ),
         "fallback_code": """
+import numpy as np
 fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 labels = df['fiscal_period'].tolist()
-x = range(len(df))
-net_m = df['net_margin_pct'].fillna(0)
-op_m = df['operating_margin_pct'].fillna(0)
-ax.fill_between(list(x), 0, net_m, alpha=0.15, color='#00b4d8')
-ax.plot(list(x), net_m, color='#00b4d8', linewidth=2, marker='o', markersize=6, label='Net Margin %')
-ax.plot(list(x), op_m, color='#06d6a0', linewidth=2, marker='s', markersize=6, linestyle='--', label='Operating Margin %')
+x = list(range(len(df)))
+net_m = [v if pd.notna(v) else np.nan for v in df['net_margin_pct']]
+op_m = [v if pd.notna(v) else np.nan for v in df['operating_margin_pct']]
+ax.fill_between(x, 0, net_m, alpha=0.15, color='#00b4d8')
+ax.plot(x, net_m, color='#00b4d8', linewidth=2, marker='o', markersize=6, label='Net Margin %')
+ax.plot(x, op_m, color='#06d6a0', linewidth=2, marker='s', markersize=6, linestyle='--', label='Operating Margin %')
 for i, (n, o) in enumerate(zip(net_m, op_m)):
-    if n != 0:
+    if pd.notna(n) and n != 0:
         ax.annotate(f'{n:.1f}%', (i, n), textcoords='offset points', xytext=(0, 8), ha='center', fontsize=8, color='#00b4d8')
-    if o != 0:
+    if pd.notna(o) and o != 0:
         ax.annotate(f'{o:.1f}%', (i, o), textcoords='offset points', xytext=(0, -12), ha='center', fontsize=8, color='#06d6a0')
-ax.set_xticks(list(x))
+ax.set_xticks(x)
 ax.set_xticklabels(labels, rotation=30, fontsize=9, ha='right')
 ax.set_title('Profitability Margin Trend', fontsize=14, fontweight='bold')
 ax.set_ylabel('Margin %', fontsize=11)
@@ -765,19 +796,27 @@ ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
             f"ALL values ALREADY in billions. Do NOT divide by 1e9. Fix the critique issues."
         ),
         "fallback_code": """
+import numpy as np
 fig, ax = plt.subplots(figsize=(14, 6))
 ax.set_facecolor('#f8f9fa')
 fig.patch.set_facecolor('white')
 labels = df['fiscal_period'].tolist()
 x = range(len(df))
-liab_b = df['total_liabilities_billions'].fillna(0)
-eq_b = df['stockholders_equity_billions'].fillna(0)
-assets_b = df['total_assets_billions'].fillna(0)
-ax.bar(list(x), liab_b, color='#ef476f', alpha=0.7, label='Total Liabilities')
-ax.bar(list(x), eq_b, bottom=liab_b, color='#06d6a0', alpha=0.7, label="Stockholders' Equity")
-ax.plot(list(x), assets_b, color='#00b4d8', linewidth=2, marker='D', markersize=7, label='Total Assets')
-for i, v in enumerate(assets_b):
-    ax.annotate(f'${v:.0f}B', (i, v), textcoords='offset points', xytext=(0, 8), ha='center', fontsize=8, fontweight='bold')
+liab_b = df['total_liabilities_billions'].fillna(np.nan)
+eq_b = df['stockholders_equity_billions'].fillna(np.nan)
+assets_b = df['total_assets_billions'].fillna(np.nan)
+# For stacked bars, use 0 where data is missing to avoid matplotlib errors
+liab_plot = liab_b.fillna(0)
+eq_plot = eq_b.fillna(0)
+ax.bar(list(x), liab_plot, color='#ef476f', alpha=0.7, label='Total Liabilities')
+ax.bar(list(x), eq_plot, bottom=liab_plot, color='#06d6a0', alpha=0.7, label="Stockholders' Equity")
+# Assets line — only plot valid points
+a_x = [i for i, v in enumerate(assets_b) if pd.notna(v)]
+a_y = [v for v in assets_b if pd.notna(v)]
+if a_x:
+    ax.plot(a_x, a_y, color='#00b4d8', linewidth=2, marker='D', markersize=7, label='Total Assets')
+    for i, v in zip(a_x, a_y):
+        ax.annotate(f'${v:.0f}B', (i, v), textcoords='offset points', xytext=(0, 8), ha='center', fontsize=8, fontweight='bold')
 ax.set_xticks(list(x))
 ax.set_xticklabels(labels, rotation=30, fontsize=9, ha='right')
 ax.set_title('Balance Sheet Composition', fontsize=14, fontweight='bold')

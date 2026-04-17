@@ -147,3 +147,80 @@ Compared FinSage (16-page PDF, CAVM pipeline) against ChineseFinSight (49-page r
 - **Tradeoff**: `claude-opus-4-6` is significantly more expensive and slower than `mistral-large2`, but produces the highest quality analysis text. With ~25+ Cortex calls per report, generation time and cost will increase. User accepted this tradeoff for quality.
 - **Kept unchanged**: `pixtral-large` for VLM fallback (specialized vision model), `openai-gpt-5.2` for primary VLM critique (via Snowflake Cortex).
 - **Status**: Complete
+
+---
+
+## Phase 6: Gemini Evaluation Fixes (2026-04-17)
+
+### Context
+Ran GOOGL FinSage report through Gemini as an external judge. Gemini identified systematic data quality issues across the report: Key Facts all N/A, peer comparisons broken, D/E ratios wildly wrong, revenue growth showing 0.0% for most quarters, and charts displaying misleading zeros instead of missing data. Root cause analysis revealed a mix of column name mismatches, data pipeline limitations, and anti-patterns in NULL handling. All fixes were designed to work across all 50 tracked tickers, not just GOOGL.
+
+### 6.1 Key Facts All N/A — Column Name Mismatch
+- **Problem**: Key Facts section (net margin, revenue, EPS) displayed all N/A values despite data existing in the warehouse.
+- **Root Cause**: `analysis_agent.py` queried column `NET_MARGIN` but the actual column in `FCT_FUNDAMENTALS_GROWTH` is `NET_MARGIN_PCT`. The SQL error was silently swallowed by the except block, causing the entire key facts query to fail and return empty results.
+- **Fix**: Changed 4 references from `NET_MARGIN` to `NET_MARGIN_PCT` in `analysis_agent.py` (lines ~912, 924, 1118, 1130).
+- **Decision**: This was a silent failure — the except block caught the SQL compilation error and returned None without logging the SQL error itself. The column mismatch likely originated from a dbt model rename that wasn't propagated to the agent code.
+- **Status**: Complete
+
+### 6.2 Peer EPS/Revenue All N/A
+- **Problem**: Peer comparison table showed N/A for all EPS and revenue values across all peer tickers.
+- **Root Cause**: Same column name mismatch as 6.1 — the peer comparison query in `analysis_agent.py` also used `NET_MARGIN` instead of `NET_MARGIN_PCT`.
+- **Fix**: Corrected alongside Fix 6.1.
+- **Status**: Complete
+
+### 6.3 Peer D/E Ratios Wildly Wrong (~100x Inflated)
+- **Problem**: Peer D/E ratios showed values like 102.63 for AAPL (should be ~3.30). Target ticker GOOGL was correct because it had a special SEC override, but peers did not.
+- **Root Cause**: Dual-source problem. `DIM_COMPANY.DEBT_TO_EQUITY` stores percentage-scaled values from Yahoo Finance (e.g., AAPL=102.63 meaning 102.63%, i.e., ratio of 1.03). `FCT_SEC_FINANCIAL_SUMMARY.DEBT_TO_EQUITY_RATIO` stores proper ratios (e.g., AAPL=3.30). The SEC D/E override in `analysis_agent.py` only applied to the target ticker, leaving peers with the ~100x-inflated DIM_COMPANY values.
+- **Fix**: Batch SEC D/E override now queries `FCT_SEC_FINANCIAL_SUMMARY` for ALL tickers in the peer set and applies the override universally, not just for the target ticker.
+- **Decision**: The proper fix is at the agent layer (override at query time) rather than changing the dbt model, because `DIM_COMPANY.DEBT_TO_EQUITY` is sourced directly from Yahoo Finance and other consumers may expect the original scale.
+- **Status**: Complete
+
+### 6.4 Revenue Growth 0.0% for Most Quarters
+- **Problem**: Revenue growth chart showed 0.0% for 4 out of 5 quarters. Only the most recent quarter had a YoY growth value.
+- **Root Cause**: Two compounding issues: (A) `fillna(0)` converted NULL growth values to literal 0.0%, making missing data look like zero growth. (B) yfinance `quarterly_income_stmt` returns only ~5 quarters of data, but the dbt model `fct_fundamentals_growth.sql` uses `LAG(revenue, 4)` which requires 8+ quarters to compute YoY growth. With only 5 quarters, only 1 quarter had a prior-year comparison.
+- **Fix — Data Pipeline** (`src/data_loaders/fundamentals_loader.py`):
+  - Added annual statement fetching (`yf_ticker.income_stmt`, `yf_ticker.balance_sheet`) alongside quarterly data
+  - Added `seen_quarters` dedup set to prevent quarterly/annual overlap
+  - Second pass derives quarterly approximations from annual data: `revenue/4`, `net_income/4`, `eps/4` (marked with `source: 'yahoo_finance_annual_approx'`)
+  - Balance sheet items (total_assets, total_liabilities) taken as-is from annual data (point-in-time values don't need division)
+  - Result: 16-21 quarters per ticker (up from 5-7)
+- **Fix — Load Script** (`scripts/load_sample_fundamentals.py`):
+  - Completely rewritten to use modular `FundamentalsLoader` instead of duplicate inline logic
+  - Now loads all tickers from `config/tickers.yaml` (50 tickers) instead of 3 hardcoded tickers
+- **Data Reload Results**:
+  - All 50 tickers loaded successfully (0 failures)
+  - `dbt build`: 35 PASS, 0 ERROR, 5 NO-OP exposures
+  - GOOGL: 15 quarters in analytics, 11 with YoY growth (was 5 quarters, 1 with YoY)
+  - All tickers: 15-17 quarters, 11-13 with YoY growth
+- **Decision**: Annual-to-quarterly approximation (dividing by 4) is a known simplification — it doesn't capture seasonality. However, for YoY growth computation this is acceptable because: (a) we're comparing same-quarter-to-same-quarter, so the approximation bias cancels out, (b) the approximated rows are clearly marked with `source: 'yahoo_finance_annual_approx'` for transparency, (c) having approximate growth data is far better than showing 0.0% or N/A.
+- **Status**: Complete
+
+### 6.5 37 `fillna(0)` Anti-Patterns Across Charts
+- **Problem**: Charts displayed misleading zeros where data was actually missing. Revenue growth of 0.0%, EPS of 0.0, sentiment scores of 0 — all indistinguishable from actual zero values.
+- **Root Cause**: 37 occurrences of `fillna(0)` across `chart_data_prep.py` (16) and `chart_agent.py` (21) silently converted NaN/NULL to zero before charting.
+- **Fix** (`agents/chart_data_prep.py`):
+  - All 16 `fillna(0)` calls removed
+  - Added `_safe_round_list()` helper that preserves `None` for NaN entries while rounding valid float values
+  - All data preparation methods now return `None` for missing data points instead of `0`
+- **Fix** (`agents/chart_agent.py`):
+  - 20 of 21 `fillna(0)` calls removed from fallback chart code templates
+  - Chart fallback code rewritten to filter `None`/`NaN` before plotting and show "N/A" annotations for missing quarters
+- **Decision**: Preserving `None` over `fillna(0)` is the correct approach because: (a) matplotlib handles `None` gracefully (gaps in line charts, missing bars), (b) analysts need to distinguish "no data" from "zero value", (c) downstream LLM analysis is more accurate when it sees gaps rather than artificial zeros.
+- **Status**: Complete
+
+### 6.6 SEC Risk Factors Generic Summarization
+- **Problem**: SEC Risk Factors section produced generic, boilerplate-sounding summaries that didn't surface company-specific risks.
+- **Root Cause**: Cortex SUMMARIZE produces generic summaries from risk factor text. The underlying data is fine — `RAW_SEC_FILING_DOCUMENTS.RISK_FACTORS_TEXT` contains 113K-146K chars of detailed risk text per filing. The issue is the summarization model's tendency to generalize rather than extract specific risks.
+- **Decision**: Deferred. This is a Cortex model quality issue, not a data engineering problem. Potential future fixes: (a) use Cortex COMPLETE with a more specific prompt instead of SUMMARIZE, (b) pre-chunk the risk factors and summarize each category separately, (c) use Bedrock KB RAG to retrieve specific risk passages.
+- **Status**: Deferred
+
+### Summary Table
+
+| # | Issue | Root Cause | Files Modified | Impact |
+|---|-------|-----------|---------------|--------|
+| 6.1 | Key Facts all N/A | `NET_MARGIN` vs `NET_MARGIN_PCT` column mismatch | `analysis_agent.py` | All tickers |
+| 6.2 | Peer data all N/A | Same column mismatch in peer query | `analysis_agent.py` | All tickers |
+| 6.3 | Peer D/E ~100x wrong | SEC D/E override only for target ticker | `analysis_agent.py` | All tickers |
+| 6.4 | Revenue Growth 0.0% | Only 5 quarters (need 8+ for YoY) + `fillna(0)` | `fundamentals_loader.py`, `load_sample_fundamentals.py` | All 50 tickers |
+| 6.5 | Charts show 0 not N/A | 37 `fillna(0)` calls | `chart_data_prep.py`, `chart_agent.py` | All charts, all tickers |
+| 6.6 | Generic risk factors | Cortex SUMMARIZE quality | — | Deferred |

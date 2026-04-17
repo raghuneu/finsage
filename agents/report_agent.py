@@ -42,9 +42,27 @@ from reportlab.platypus import (
     PageBreak, PageTemplate, Paragraph, Spacer, Table,
     TableStyle, HRFlowable
 )
-from reportlab.platypus.flowables import KeepTogether
+from reportlab.platypus.flowables import KeepTogether, Flowable
 
 logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────
+# Section marker for dynamic TOC page numbers
+# ──────────────────────────────────────────────────────────────
+class SectionMarker(Flowable):
+    """Zero-height flowable that records its page number when drawn."""
+    width = 0
+    height = 0
+
+    def __init__(self, section_key: str, page_map: dict):
+        super().__init__()
+        self.section_key = section_key
+        self.page_map = page_map
+
+    def draw(self):
+        page_num = self.canv.getPageNumber()
+        self.page_map[self.section_key] = page_num
 
 # ──────────────────────────────────────────────────────────────
 # Midnight Teal Palette
@@ -132,6 +150,22 @@ def get_signal(chart_id: str, data_summary: dict) -> tuple:
         elif health == "UNPROFITABLE":
             return "WEAK ▼", C_BEARISH
         return "FAIR →", C_NEUTRAL
+
+    elif chart_id == "margin_trend":
+        trend = data_summary.get("margin_trend", "insufficient data")
+        if trend == "expanding":
+            return "EXPANDING ▲", C_BULLISH
+        elif trend == "compressing":
+            return "COMPRESSING ▼", C_BEARISH
+        return "FLAT →", C_NEUTRAL
+
+    elif chart_id == "balance_sheet":
+        equity_pct = data_summary.get("equity_pct")
+        if equity_pct is not None and equity_pct > 40:
+            return "STRONG ▲", C_BULLISH
+        elif equity_pct is not None and equity_pct < 20:
+            return "WEAK ▼", C_BEARISH
+        return "MODERATE →", C_NEUTRAL
 
     return "NEUTRAL →", C_NEUTRAL
 
@@ -525,8 +559,8 @@ def build_cover(ticker: str, company_name: str, styles: dict,
     return elements
 
 
-def build_toc(charts: list, styles: dict) -> list:
-    """Build Table of Contents page."""
+def build_toc(charts: list, styles: dict, page_map: dict = None) -> list:
+    """Build Table of Contents page. Uses page_map for dynamic page numbers."""
     elements = []
     elements.append(Paragraph("Table of Contents", styles["page_title"]))
     elements.append(HRFlowable(
@@ -553,23 +587,24 @@ def build_toc(charts: list, styles: dict) -> list:
     )
 
     # Build dotted-leader TOC as a 3-column Table
+    pm = page_map or {}
     toc_rows_data = [
-        ("1.", "Executive Summary", "3", True),
-        ("2.", "Company Overview", "5", True),
-        ("3.", "Analysis Sections", "6", True),
+        ("1.", "Executive Summary", str(pm.get("exec_summary", "?")), True),
+        ("2.", "Company Overview", str(pm.get("company_overview", "?")), True),
+        ("3.", "Analysis Sections", str(pm.get("analysis_sections", "?")), True),
     ]
-    page_cursor = 7
     chart_sub_rows = []
     for i, c in enumerate(charts):
-        chart_sub_rows.append((f"3.{i+1}", c.get("title", c["chart_id"]), str(page_cursor), False))
-        page_cursor += 1
+        key = f"chart_{c['chart_id']}"
+        chart_sub_rows.append((f"3.{i+1}", c.get("title", c["chart_id"]),
+                               str(pm.get(key, "?")), False))
 
     more_rows_data = [
-        ("4.", "Financial Metrics Summary", str(page_cursor), True),
-        ("5.", "Peer Comparison", str(page_cursor + 2), True),
-        ("6.", "Risk Factors", str(page_cursor + 3), True),
-        ("7.", "Investment Recommendation", str(page_cursor + 5), True),
-        ("8.", "Appendix & Data Sources", str(page_cursor + 6), True),
+        ("4.", "Financial Metrics Summary", str(pm.get("financial_metrics", "?")), True),
+        ("5.", "Peer Comparison", str(pm.get("peer_comparison", "?")), True),
+        ("6.", "Risk Factors", str(pm.get("risk_factors", "?")), True),
+        ("7.", "Investment Recommendation", str(pm.get("recommendation", "?")), True),
+        ("8.", "Appendix & Data Sources", str(pm.get("appendix", "?")), True),
     ]
 
     entry_style = ParagraphStyle("te", fontName="Helvetica", fontSize=11,
@@ -668,30 +703,42 @@ def build_executive_summary(ticker: str, charts: list,
             Paragraph(str(value), styles["exec_value"]),
         ]
 
+    def _fmt_val(v, fmt="{}", suffix="", prefix=""):
+        """Format a metric value, returning 'N/A' for None."""
+        if v is None:
+            return "N/A"
+        return f"{prefix}{fmt.format(v)}{suffix}"
+
+    # Net margin: prefer chart data, fall back to analysis company_overview
+    net_margin_val = fin_data.get("net_margin_pct")
+    if net_margin_val is None:
+        co_facts = analysis.get("company_overview", {}).get("key_facts", {})
+        net_margin_val = co_facts.get("net_margin") or co_facts.get("profit_margin")
+
     metrics = [
         [
             metric_cell("Current Price",
-                f"${price_data.get('current_price', 'N/A')}"),
+                _fmt_val(price_data.get('current_price'), prefix="$")),
             metric_cell("Trend Signal",
-                price_data.get("trend_signal", "N/A")),
+                price_data.get("trend_signal") or "N/A"),
             metric_cell("30D Volatility",
-                f"{vol_data.get('volatility_30d_pct', 'N/A')}%"),
+                _fmt_val(vol_data.get('volatility_30d_pct'), suffix="%")),
         ],
         [
             metric_cell("Revenue Growth (YoY)",
-                f"{fund_data.get('latest_revenue_growth_yoy', 'N/A')}%"),
+                _fmt_val(fund_data.get('latest_revenue_growth_yoy'), suffix="%")),
             metric_cell("Latest EPS",
-                f"${eps_data.get('latest_eps', 'N/A')}"),
+                _fmt_val(eps_data.get('latest_eps'), prefix="$")),
             metric_cell("EPS Growth (YoY)",
-                f"{eps_data.get('eps_growth_yoy_pct', 'N/A')}%"),
+                _fmt_val(eps_data.get('eps_growth_yoy_pct'), suffix="%")),
         ],
         [
             metric_cell("Net Margin",
-                f"{fin_data.get('net_margin_pct', 'N/A')}%"),
+                _fmt_val(net_margin_val, suffix="%")),
             metric_cell("Debt/Equity",
-                fin_data.get("debt_to_equity_ratio", "N/A")),
+                _fmt_val(fin_data.get("debt_to_equity_ratio"))),
             metric_cell("News Sentiment",
-                sent_data.get("sentiment_label", "N/A")),
+                sent_data.get("sentiment_label") or "N/A"),
         ],
     ]
 
@@ -857,6 +904,33 @@ def build_chart_section(chart: dict, analysis_text: str,
     elements.append(header_table)
     elements.append(Spacer(1, 4))
 
+    # ── "Data unavailable" callout when all metrics are null ──
+    _numeric_vals = [v for k, v in data_summary.items()
+                     if k not in ("financial_health",) and v is not None]
+    if data_summary and not _numeric_vals:
+        callout = Table(
+            [[Paragraph(
+                '<font color="#92400e"><b>⚠ Underlying data unavailable</b> — '
+                'The structured data for this chart could not be retrieved from '
+                'the data warehouse. The chart image and LLM analysis below may '
+                'not reflect current figures.</font>',
+                ParagraphStyle("callout", fontName="Helvetica", fontSize=8,
+                               textColor=colors.HexColor("#92400e"),
+                               leading=11)
+            )]],
+            colWidths=[content_width],
+        )
+        callout.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fef3c7")),
+            ("ROUNDEDCORNERS", [4, 4, 4, 4]),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(callout)
+        elements.append(Spacer(1, 4))
+
     # ── Chart image ──────────────────────────────────────────
     file_path = chart.get("file_path", "")
     if file_path and os.path.exists(file_path):
@@ -883,7 +957,9 @@ def build_chart_section(chart: dict, analysis_text: str,
         metric_items = []
         for k, v in data_summary.items():
             label = k.replace("_", " ").title()
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and k in (
+            if v is None:
+                val_str = "N/A"
+            elif isinstance(v, (int, float)) and not isinstance(v, bool) and k in (
                 "total_revenue", "net_income", "total_assets", "total_equity",
                 "operating_income", "revenue", "market_cap"
             ):
@@ -1193,20 +1269,36 @@ def build_risk_section(risk_summary: str, charts: list, styles: dict) -> list:
 
     # Financial health risk
     fin_data = chart_map.get("financial_health", {}).get("data_summary", {})
-    dte = fin_data.get("debt_to_equity_ratio", 0)
-    margin = fin_data.get("net_margin_pct", 0)
-    fin_level = "HIGH" if (dte > 2.0 or margin < 0) else "MODERATE" if dte > 1.0 else "LOW"
+    dte = fin_data.get("debt_to_equity_ratio")
+    margin = fin_data.get("net_margin_pct")
+    # Fall back to analysis company_overview if chart data is missing
+    if margin is None:
+        co_facts = analysis.get("company_overview", {}).get("key_facts", {})
+        margin = co_facts.get("net_margin") or co_facts.get("profit_margin")
+    if margin is None or dte is None:
+        fin_level = "MODERATE"  # Insufficient data — don't flag as HIGH
+        dte_str = f"{dte:.2f}" if dte is not None else "N/A"
+        margin_str = f"{margin:.1f}%" if margin is not None else "N/A"
+    else:
+        fin_level = "HIGH" if (dte > 2.0 or margin < 0) else "MODERATE" if dte > 1.0 else "LOW"
+        dte_str = f"{dte:.2f}"
+        margin_str = f"{margin:.1f}%"
     risk_items.append(("Balance Sheet / Leverage Risk", fin_level,
-                       f"Debt-to-equity ratio: {dte:.2f}, net margin: {margin:.1f}%. "
+                       f"Debt-to-equity ratio: {dte_str}, net margin: {margin_str}. "
                        "Companies with elevated leverage face higher interest expense "
                        "and refinancing risk in rising-rate environments."))
 
     # Growth risk
     fund_data = chart_map.get("revenue_growth", {}).get("data_summary", {})
-    rev_growth = fund_data.get("latest_revenue_growth_yoy", 0)
-    growth_level = "HIGH" if rev_growth < -5 else "MODERATE" if rev_growth < 5 else "LOW"
+    rev_growth = fund_data.get("latest_revenue_growth_yoy")
+    if rev_growth is None:
+        growth_level = "MODERATE"  # Insufficient data
+        growth_str = "N/A"
+    else:
+        growth_level = "HIGH" if rev_growth < -5 else "MODERATE" if rev_growth < 5 else "LOW"
+        growth_str = f"{rev_growth:.1f}%"
     risk_items.append(("Revenue Growth Risk", growth_level,
-                       f"Latest YoY revenue growth: {rev_growth:.1f}%. "
+                       f"Latest YoY revenue growth: {growth_str}. "
                        "Slowing or negative growth may signal market share loss, "
                        "demand softening, or sector-wide headwinds."))
 
@@ -1595,17 +1687,18 @@ def build_appendix(ticker: str, charts: list, styles: dict) -> list:
     elements.append(arch_table)
     elements.append(Spacer(1, 10 * mm))
 
-    # Disclaimer
-    elements.append(HRFlowable(
+    # Disclaimer — keep together to avoid orphaned lines on a new page
+    disclaimer_elements = []
+    disclaimer_elements.append(HRFlowable(
         width="100%", thickness=0.5,
         color=C_DIVIDER, spaceAfter=6
     ))
-    elements.append(Paragraph(
+    disclaimer_elements.append(Paragraph(
         "DISCLAIMER",
         ParagraphStyle("disc_hdr", fontName="Helvetica-Bold",
                        fontSize=8, textColor=C_GRAY, spaceAfter=4)
     ))
-    elements.append(Paragraph(
+    disclaimer_elements.append(Paragraph(
         f"This report was generated automatically by FinSage, an AI-powered financial research "
         f"system developed at Northeastern University (DAMG 7374). The information contained "
         f"herein is derived from publicly available data sources including Yahoo Finance, "
@@ -1617,6 +1710,7 @@ def build_appendix(ticker: str, charts: list, styles: dict) -> list:
         f"future results. Generated on {datetime.now().strftime('%B %d, %Y at %H:%M UTC')}.",
         styles["disclaimer"]
     ))
+    elements.append(KeepTogether(disclaimer_elements))
 
     return elements
 
@@ -1698,63 +1792,97 @@ def build_pdf(
                      onPage=draw_content_page),
     ])
 
-    # ── Assemble elements ────────────────────────────────────
-    elements = []
+    # ── Assemble elements (two-pass for dynamic TOC) ───────────
+    page_map = {}  # populated by SectionMarker flowables during first pass
 
-    # Page 1: Cover (with Buy/Hold/Sell rating)
-    elements.append(NextPageTemplate("Cover"))
-    cover_elems = build_cover(ticker, company_name, styles, sig, charts=charts)
-    # Insert template switch BEFORE the PageBreak that ends the cover,
-    # so the TOC page uses the Content template (not Cover).
-    cover_elems.insert(-1, NextPageTemplate("Content"))
-    elements += cover_elems
+    def _build_elements(pm):
+        """Build the full element list. Called twice: first to discover page
+        numbers, second to render with correct TOC."""
+        elems = []
 
-    # Page 2: Table of Contents
-    elements += build_toc(charts, styles)
+        # Page 1: Cover (with Buy/Hold/Sell rating)
+        elems.append(NextPageTemplate("Cover"))
+        cover_elems = build_cover(ticker, company_name, styles, sig, charts=charts)
+        cover_elems.insert(-1, NextPageTemplate("Content"))
+        elems += cover_elems
 
-    # Pages 3-4: Executive Summary
-    elements += build_executive_summary(ticker, charts, analysis, styles)
+        # Page 2: Table of Contents
+        elems += build_toc(charts, styles, page_map=pm)
 
-    # Page 5: Company Overview
-    elements += build_company_overview(ticker, analysis, styles, charts=charts)
+        # Pages 3-4: Executive Summary
+        elems.append(SectionMarker("exec_summary", pm))
+        elems += build_executive_summary(ticker, charts, analysis, styles)
 
-    # Pages 6-11: Chart sections (one per page)
-    elements.append(Paragraph("3. Analysis Sections", styles["page_title"]))
-    elements.append(HRFlowable(
-        width="100%", thickness=1.5,
-        color=C_TEAL, spaceAfter=12
-    ))
+        # Page 5: Company Overview
+        elems.append(SectionMarker("company_overview", pm))
+        elems += build_company_overview(ticker, analysis, styles, charts=charts)
 
-    for i, chart in enumerate(charts, 1):
-        chart_id = chart["chart_id"]
-        analysis_text = analysis_map.get(
-            chart_id,
-            "Analysis not available for this chart."
+        # Pages 6-11: Chart sections (one per page)
+        elems.append(SectionMarker("analysis_sections", pm))
+        elems.append(Paragraph("3. Analysis Sections", styles["page_title"]))
+        elems.append(HRFlowable(
+            width="100%", thickness=1.5,
+            color=C_TEAL, spaceAfter=12
+        ))
+
+        for i, chart in enumerate(charts, 1):
+            chart_id = chart["chart_id"]
+            elems.append(SectionMarker(f"chart_{chart_id}", pm))
+            analysis_text = analysis_map.get(
+                chart_id,
+                "Analysis not available for this chart."
+            )
+            elems += build_chart_section(chart, analysis_text, styles,
+                                          chart_number=i,
+                                          detail_level=detail_level)
+
+        # Financial Metrics Summary (skip in summary mode)
+        if detail_level != "summary":
+            elems.append(SectionMarker("financial_metrics", pm))
+            elems += build_financial_metrics_page(charts, styles)
+
+        # Peer Comparison
+        elems.append(SectionMarker("peer_comparison", pm))
+        elems += build_peer_comparison(ticker, analysis, styles)
+
+        # Risk Factors
+        elems.append(SectionMarker("risk_factors", pm))
+        elems += build_risk_section(
+            analysis.get("risk_summary", "Risk factors not available."),
+            charts,
+            styles
         )
-        elements += build_chart_section(chart, analysis_text, styles,
-                                        chart_number=i,
-                                        detail_level=detail_level)
 
-    # Pages 12-13: Financial Metrics Summary (skip in summary mode)
-    if detail_level != "summary":
-        elements += build_financial_metrics_page(charts, styles)
+        # Investment Recommendation
+        elems.append(SectionMarker("recommendation", pm))
+        elems += build_recommendation_page(ticker, charts, analysis, styles)
 
-    # Page 14: Peer Comparison
-    elements += build_peer_comparison(ticker, analysis, styles)
+        # Appendix (skip in summary mode)
+        if detail_level != "summary":
+            elems.append(SectionMarker("appendix", pm))
+            elems += build_appendix(ticker, charts, styles)
 
-    # Pages 15-16: Risk Factors (expanded with categories)
-    elements += build_risk_section(
-        analysis.get("risk_summary", "Risk factors not available."),
-        charts,
-        styles
+        return elems
+
+    # Pass 1: render to /dev/null to collect page numbers
+    import io
+    pass1_buf = io.BytesIO()
+    doc1 = BaseDocTemplate(
+        pass1_buf,
+        pagesize=A4,
+        leftMargin=MARGIN, rightMargin=MARGIN,
+        topMargin=16 * mm, bottomMargin=14 * mm,
     )
+    doc1.addPageTemplates([
+        PageTemplate(id="Cover",   frames=[cover_frame]),
+        PageTemplate(id="Content", frames=[content_frame]),
+    ])
+    doc1.build(_build_elements(page_map))
+    pass1_buf.close()
+    logger.info("TOC pass 1 complete — page_map: %s", page_map)
 
-    # Page 17: Investment Recommendation
-    elements += build_recommendation_page(ticker, charts, analysis, styles)
-
-    # Pages 18-19: Appendix (skip in summary mode)
-    if detail_level != "summary":
-        elements += build_appendix(ticker, charts, styles)
+    # Pass 2: render final PDF with correct TOC page numbers
+    elements = _build_elements(page_map)
 
     # ── Build PDF ────────────────────────────────────────────
     logger.info("Building PDF: %s", output_path)

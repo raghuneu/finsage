@@ -909,7 +909,7 @@ def _query_company_facts(session: Session, ticker: str) -> dict:
     # Latest fundamentals
     try:
         rows = session.sql(f"""
-            SELECT FISCAL_QUARTER, REVENUE, NET_INCOME, EPS, NET_MARGIN
+            SELECT FISCAL_QUARTER, REVENUE, NET_INCOME, EPS, NET_MARGIN_PCT
             FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
             WHERE TICKER = '{safe_ticker}'
             ORDER BY FISCAL_QUARTER DESC
@@ -921,7 +921,7 @@ def _query_company_facts(session: Session, ticker: str) -> dict:
             facts["revenue"] = r["REVENUE"]
             facts["net_income"] = r["NET_INCOME"]
             facts["eps"] = r["EPS"]
-            facts["net_margin"] = r["NET_MARGIN"]
+            facts["net_margin"] = r["NET_MARGIN_PCT"]
     except Exception as e:
         logger.warning("Could not query FCT_FUNDAMENTALS_GROWTH for %s: %s", ticker, e)
 
@@ -1115,7 +1115,7 @@ def generate_peer_comparison(session: Session, ticker: str,
     # Query latest fundamentals for all tickers
     try:
         rows = session.sql(f"""
-            SELECT TICKER, FISCAL_QUARTER, REVENUE, NET_INCOME, EPS, NET_MARGIN
+            SELECT TICKER, FISCAL_QUARTER, REVENUE, NET_INCOME, EPS, NET_MARGIN_PCT
             FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
             WHERE TICKER IN ({ticker_list})
             QUALIFY ROW_NUMBER() OVER (PARTITION BY TICKER ORDER BY FISCAL_QUARTER DESC) = 1
@@ -1127,10 +1127,29 @@ def generate_peer_comparison(session: Session, ticker: str,
                 company_map[t]["revenue"] = r["REVENUE"]
                 company_map[t]["net_income"] = r["NET_INCOME"]
                 company_map[t]["eps"] = r["EPS"]
-                company_map[t]["net_margin"] = r["NET_MARGIN"]
+                company_map[t]["net_margin"] = r["NET_MARGIN_PCT"]
                 company_map[t]["latest_quarter"] = r["FISCAL_QUARTER"]
     except Exception as e:
         logger.warning("Could not query FCT_FUNDAMENTALS_GROWTH for peers: %s", e)
+
+    # Override D/E for ALL tickers with SEC-derived ratio for consistency
+    try:
+        sec_rows = session.sql(f"""
+            SELECT TICKER, DEBT_TO_EQUITY_RATIO
+            FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
+            WHERE TICKER IN ({ticker_list})
+              AND REPORTING_FREQUENCY = 'quarterly'
+              AND DEBT_TO_EQUITY_RATIO IS NOT NULL
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY TICKER ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC
+            ) = 1
+        """).collect()
+        for r in sec_rows:
+            t = r["TICKER"]
+            if t in company_map and r["DEBT_TO_EQUITY_RATIO"] is not None:
+                company_map[t]["debt_to_equity"] = float(r["DEBT_TO_EQUITY_RATIO"])
+    except Exception as e:
+        logger.warning("Could not query FCT_SEC_FINANCIAL_SUMMARY for D/E override: %s", e)
 
     # Build peers list (target first, then peers) — exclude peers with no data
     excluded_peers = []
