@@ -2,9 +2,11 @@
 
 import os
 import sys
+import json
 import uuid
 import threading
-from typing import Dict, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 from pathlib import Path
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
@@ -70,6 +72,7 @@ def start_cavm_pipeline(req: CAVMRequest, session=Depends(get_snowpark_session))
         "ticker": ticker,
         "result": None,
         "error": None,
+        "messages": [],
         "auto_load": req.auto_load and not readiness["ready"],
     }
 
@@ -83,12 +86,23 @@ def start_cavm_pipeline(req: CAVMRequest, session=Depends(get_snowpark_session))
 
             from orchestrator import generate_report_pipeline
 
+            def _update_stage(stage: int):
+                _tasks[task_id]["stage"] = stage
+
+            def _add_message(msg: str):
+                msgs = _tasks[task_id]["messages"]
+                msgs.append(msg)
+                if len(msgs) > 20:
+                    _tasks[task_id]["messages"] = msgs[-20:]
+
             result = generate_report_pipeline(
                 ticker=ticker,
                 debug=req.debug,
                 skip_charts=req.skip_charts,
                 charts_dir=req.charts_dir,
                 detail_level=req.detail_level,
+                on_stage=_update_stage,
+                on_message=_add_message,
             )
             _tasks[task_id]["status"] = "completed"
             _tasks[task_id]["stage"] = 4
@@ -120,14 +134,78 @@ def cavm_status(task_id: str):
     return task
 
 
+class ReportHistoryItem(BaseModel):
+    folder_name: str
+    pdf_filename: str
+    run_at: Optional[str] = None
+    elapsed_seconds: Optional[float] = None
+    detail_level: str  # "summary" or "full"
+    pdf_path: str  # relative path for download endpoint
+
+
+@router.get("/history/{ticker}", response_model=List[ReportHistoryItem])
+def report_history(ticker: str):
+    """Return previously generated reports for a ticker, newest first."""
+    outputs_dir = PROJECT_ROOT / "outputs"
+    if not outputs_dir.exists():
+        return []
+
+    prefix = ticker.upper() + "_"
+    results: List[ReportHistoryItem] = []
+
+    for folder in outputs_dir.iterdir():
+        if not folder.is_dir() or not folder.name.startswith(prefix):
+            continue
+
+        # Look for PDF files in this folder
+        pdfs = list(folder.glob("*.pdf"))
+        if not pdfs:
+            continue
+
+        # Try to read pipeline_result.json for metadata
+        run_at = None
+        elapsed = None
+        result_file = folder / "pipeline_result.json"
+        if result_file.exists():
+            try:
+                meta = json.loads(result_file.read_text())
+                run_at = meta.get("run_at")
+                elapsed = meta.get("elapsed_seconds")
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Infer run_at from folder name if not in metadata (TICKER_YYYYMMDD_HHMMSS)
+        if not run_at:
+            parts = folder.name.split("_")
+            if len(parts) >= 3:
+                try:
+                    dt = datetime.strptime(f"{parts[-2]}_{parts[-1]}", "%Y%m%d_%H%M%S")
+                    run_at = dt.isoformat()
+                except ValueError:
+                    pass
+
+        for pdf in pdfs:
+            detail = "summary" if "Summary" in pdf.name else "full"
+            results.append(ReportHistoryItem(
+                folder_name=folder.name,
+                pdf_filename=pdf.name,
+                run_at=run_at,
+                elapsed_seconds=elapsed,
+                detail_level=detail,
+                pdf_path=f"{folder.name}/{pdf.name}",
+            ))
+
+    # Sort newest first by run_at
+    results.sort(key=lambda r: r.run_at or "", reverse=True)
+    return results
+
+
 @router.get("/download/{filename:path}")
 def download_report(filename: str):
-    # Look in the outputs directory
-    project_root = Path(__file__).resolve().parent.parent.parent
-    filepath = project_root / "outputs" / filename
+    """Download a PDF report from the outputs directory."""
+    filepath = PROJECT_ROOT / "outputs" / filename
 
     if not filepath.exists():
-        # Try as absolute path
         filepath = Path(filename)
 
     if filepath.exists() and filepath.suffix == ".pdf":
