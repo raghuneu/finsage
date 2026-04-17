@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -m pytest tests/test_evaluator.py -v)",
+      "Bash(py -m pip install pytest --quiet)"
+    ]
+  }
+}
