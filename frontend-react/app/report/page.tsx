@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Card,
@@ -97,6 +97,33 @@ export default function ReportPage() {
   // Filter existing reports by detail level for the relevant card
   const summaryReports = existingReports.filter((r: ExistingReport) => r.detail_level === 'summary');
   const fullReports = existingReports.filter((r: ExistingReport) => r.detail_level === 'full');
+
+  // Track which report folder the chat is grounded to
+  const [activeFolderName, setActiveFolderName] = useState<string | null>(null);
+
+  // Auto-set active folder when a CAVM run completes (use its output folder)
+  useEffect(() => {
+    if (cavmForTicker && cavm.result) {
+      const resultFolder = String((cavm.result as Record<string, unknown>).output_folder || '');
+      if (resultFolder) setActiveFolderName(resultFolder);
+    }
+  }, [cavmForTicker, cavm.result]);
+
+  // Reset active folder when ticker changes
+  useEffect(() => {
+    setActiveFolderName(null);
+  }, [ticker]);
+
+  // Determine the folder to use for chat: explicit selection > latest existing report
+  const chatFolderName = activeFolderName
+    || (reportType === 'cavm-summary' ? summaryReports[0]?.folder_name : fullReports[0]?.folder_name)
+    || existingReports[0]?.folder_name
+    || undefined;
+
+  // Show chat when there's a report to talk about (either just-generated or historical)
+  const showReportChat = reportType !== 'quick' && (
+    (cavmForTicker && cavm.result) || existingReports.length > 0
+  );
 
   const formatReportDate = (isoDate: string | null) => {
     if (!isoDate) return 'Unknown date';
@@ -232,7 +259,7 @@ export default function ReportPage() {
                     startIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
                     href={`${apiBase}/api/report/download/${encodeURIComponent(summaryReports[0].pdf_path)}`}
                     target="_blank"
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveFolderName(summaryReports[0].folder_name); }}
                     sx={{
                       fontSize: '0.7rem', py: 0.25, px: 1,
                       borderColor: 'rgba(3,183,146,0.3)', color: '#03B792',
@@ -289,7 +316,7 @@ export default function ReportPage() {
                     startIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
                     href={`${apiBase}/api/report/download/${encodeURIComponent(fullReports[0].pdf_path)}`}
                     target="_blank"
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveFolderName(fullReports[0].folder_name); }}
                     sx={{
                       fontSize: '0.7rem', py: 0.25, px: 1,
                       borderColor: 'rgba(3,183,146,0.3)', color: '#03B792',
@@ -565,10 +592,12 @@ export default function ReportPage() {
                   Download PDF Report
                 </Button>
               )}
-
-              {/* Chat about the generated report */}
-              <ReportChat ticker={ticker} />
             </Box>
+          )}
+
+          {/* Chat about the report — visible for both just-generated and historical reports */}
+          {showReportChat && (
+            <ReportChat ticker={ticker} folderName={chatFolderName} />
           )}
         </Box>
       )}

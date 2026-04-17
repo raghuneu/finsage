@@ -32,6 +32,7 @@ class _Message(TypedDict):
 
 class _SessionState(TypedDict):
     ticker: str
+    folder_name: str  # output directory name grounding this session
     history: List[_Message]
 
 
@@ -65,24 +66,30 @@ honestly rather than guessing.
 # Context loader
 # ---------------------------------------------------------------------------
 
-def _load_report_context(ticker: str) -> str:
-    """Load context from the most recent outputs/<TICKER>_*/ directory.
+def _load_report_context(ticker: str, folder_name: str | None = None) -> tuple[str, str]:
+    """Load context from an outputs/<TICKER>_*/ directory.
 
-    Reads pipeline_result.json, chart_manifest.json, *.md, analysis*.txt,
-    *analysis*.json, and executive_summary* files. Caps at MAX_CONTEXT_CHARS.
+    If *folder_name* is provided, uses that specific directory; otherwise falls
+    back to the most recent one by mtime.
+
+    Returns (context_text, resolved_folder_name).
     """
     if not OUTPUTS_DIR.exists():
-        return f"No outputs directory found. No generated report available for {ticker}."
+        return f"No outputs directory found. No generated report available for {ticker}.", ""
 
-    # Pick most recent directory by mtime
     candidates = [
         d for d in OUTPUTS_DIR.iterdir()
         if d.is_dir() and d.name.upper().startswith(f"{ticker.upper()}_")
     ]
     if not candidates:
-        return f"No generated report found for {ticker}."
+        return f"No generated report found for {ticker}.", ""
 
-    out_dir = max(candidates, key=lambda p: p.stat().st_mtime)
+    # Resolve target directory
+    out_dir = None
+    if folder_name:
+        out_dir = next((d for d in candidates if d.name == folder_name), None)
+    if out_dir is None:
+        out_dir = max(candidates, key=lambda p: p.stat().st_mtime)
 
     parts: List[str] = [f"Report directory: {out_dir.name}"]
 
@@ -132,7 +139,7 @@ def _load_report_context(ticker: str) -> str:
         parts.append(f"--- {f.name} ---\n{text}")
 
     context = "\n\n".join(parts)
-    return context[:MAX_CONTEXT_CHARS]
+    return context[:MAX_CONTEXT_CHARS], out_dir.name
 
 
 # ---------------------------------------------------------------------------
@@ -203,26 +210,32 @@ def _parse_cortex_response(raw: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def ask(session: Any, session_id: str, ticker: str, question: str) -> str:
+def ask(session: Any, session_id: str, ticker: str, question: str, folder_name: str | None = None) -> str:
     """Ask a question about the ticker's report via Snowflake Cortex.
 
-    Binds session_id to ticker on first call. If the ticker changes mid-session,
-    the session history is reset. Returns the answer string.
+    Binds session_id to ticker (and optionally a specific report folder) on
+    first call. If the ticker or folder changes mid-session, the session
+    history is reset. Returns the answer string.
     """
     ticker = ticker.upper().strip()
 
     with _lock:
         state = _sessions.get(session_id)
-        if state is None or state["ticker"] != ticker:
-            # New session or ticker changed — reset
-            report_context = _load_report_context(ticker)
+        needs_reset = (
+            state is None
+            or state["ticker"] != ticker
+            or (folder_name and state.get("folder_name") != folder_name)
+        )
+        if needs_reset:
+            report_context, resolved_folder = _load_report_context(ticker, folder_name)
             _sessions[session_id] = {
                 "ticker": ticker,
+                "folder_name": resolved_folder,
                 "history": [],
             }
             state = _sessions[session_id]
         else:
-            report_context = _load_report_context(ticker)
+            report_context, _ = _load_report_context(ticker, state.get("folder_name"))
 
         # Build messages array for Cortex
         system_content = SYSTEM_PROMPT.format(report_context=report_context)

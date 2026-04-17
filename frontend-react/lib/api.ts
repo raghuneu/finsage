@@ -76,8 +76,8 @@ export const fetchQueryAttribution = () =>
   api.get(`/api/observability/query-attribution`).then(r => r.data);
 
 // Report Chat (conversational Q&A about generated reports)
-export const askReportChat = (ticker: string, sessionId: string, question: string) =>
-  api.post(`/api/report_chat/ask`, { ticker, session_id: sessionId, question }).then(r => r.data);
+export const askReportChat = (ticker: string, sessionId: string, question: string, folderName?: string) =>
+  api.post(`/api/report_chat/ask`, { ticker, session_id: sessionId, question, folder_name: folderName ?? null }).then(r => r.data);
 
 export const resetReportChat = (sessionId: string) =>
   api.post(`/api/report_chat/reset`, { session_id: sessionId }).then(r => r.data);

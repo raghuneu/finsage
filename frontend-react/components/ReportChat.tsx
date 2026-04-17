@@ -13,10 +13,12 @@ import {
   Button,
   Divider,
   Alert,
+  Tooltip,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ChatMessage from '@/components/ChatMessage';
 import { askReportChat, resetReportChat } from '@/lib/api';
 
@@ -32,29 +34,45 @@ const STARTER_PROMPTS = [
   'Is sentiment bullish or bearish?',
 ];
 
+/** Parse "AAPL_20260415_103022" → "Apr 15, 2026 10:30 AM" */
+const formatFolderDate = (folder?: string): string | null => {
+  if (!folder) return null;
+  const m = folder.match(/_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/);
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  return (
+    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' +
+    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  );
+};
+
 interface ReportChatProps {
   ticker: string;
+  folderName?: string;
 }
 
-export default function ReportChat({ ticker }: ReportChatProps) {
+export default function ReportChat({ ticker, folderName }: ReportChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef(crypto.randomUUID());
   const prevTickerRef = useRef(ticker);
+  const prevFolderRef = useRef(folderName);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-reset session when ticker changes
+  // Auto-reset session when ticker or folder changes
   useEffect(() => {
-    if (prevTickerRef.current !== ticker) {
+    if (prevTickerRef.current !== ticker || prevFolderRef.current !== folderName) {
       prevTickerRef.current = ticker;
+      prevFolderRef.current = folderName;
       sessionIdRef.current = crypto.randomUUID();
       setMessages([]);
       setInput('');
       setError(null);
     }
-  }, [ticker]);
+  }, [ticker, folderName]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -72,7 +90,7 @@ export default function ReportChat({ ticker }: ReportChatProps) {
       setLoading(true);
 
       try {
-        const data = await askReportChat(ticker, sessionIdRef.current, question.trim());
+        const data = await askReportChat(ticker, sessionIdRef.current, question.trim(), folderName);
         const assistantMsg: Message = {
           role: 'assistant',
           content: data.answer,
@@ -85,7 +103,7 @@ export default function ReportChat({ ticker }: ReportChatProps) {
         setLoading(false);
       }
     },
-    [ticker, loading],
+    [ticker, loading, folderName],
   );
 
   const handleClear = async () => {
@@ -103,12 +121,12 @@ export default function ReportChat({ ticker }: ReportChatProps) {
   };
 
   return (
-    <Card sx={{ mt: 3, borderLeft: '3px solid #0382B7' }}>
+    <Card sx={{ mt: 3, borderLeft: '3px solid #03B792' }}>
       <CardContent>
         {/* Header: icon + title + ticker chip + clear button */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <SmartToyIcon sx={{ color: '#0382B7', fontSize: 22 }} />
+            <SmartToyIcon sx={{ color: '#03B792', fontSize: 22 }} />
             <Typography
               variant="h6"
               sx={{ fontFamily: '"DM Serif Display", Georgia, serif', fontWeight: 400 }}
@@ -119,12 +137,30 @@ export default function ReportChat({ ticker }: ReportChatProps) {
               label={ticker}
               size="small"
               sx={{
-                backgroundColor: 'rgba(3,130,183,0.08)',
-                color: '#0382B7',
+                backgroundColor: 'rgba(3,183,146,0.08)',
+                color: '#03B792',
                 fontWeight: 600,
                 fontSize: '0.7rem',
               }}
             />
+            {folderName && formatFolderDate(folderName) && (
+              <Chip
+                label={formatFolderDate(folderName)}
+                size="small"
+                sx={{
+                  backgroundColor: 'rgba(3,183,146,0.06)',
+                  color: '#6B6760',
+                  fontSize: '0.65rem',
+                }}
+              />
+            )}
+            <Tooltip
+              title="This chat is grounded to the report shown above. Click &lsquo;View Previous Report&rsquo; on any report card to switch which report you're chatting about."
+              arrow
+              placement="top"
+            >
+              <InfoOutlinedIcon sx={{ fontSize: 16, color: '#B0ADA6', cursor: 'help' }} />
+            </Tooltip>
           </Box>
           {messages.length > 0 && (
             <Button
@@ -139,7 +175,7 @@ export default function ReportChat({ ticker }: ReportChatProps) {
         </Box>
 
         <Typography variant="body2" sx={{ color: '#6B6760', mb: 1.5, fontSize: '0.8rem' }}>
-          Ask follow-up questions about the generated report for {ticker}.
+          Ask follow-up questions about the {formatFolderDate(folderName) ? `${formatFolderDate(folderName)} report` : 'latest report'} for {ticker}.
         </Typography>
 
         <Divider sx={{ mb: 2 }} />
@@ -162,10 +198,10 @@ export default function ReportChat({ ticker }: ReportChatProps) {
                 onClick={() => sendMessage(prompt)}
                 sx={{
                   cursor: 'pointer',
-                  backgroundColor: 'rgba(3,130,183,0.06)',
-                  color: '#0382B7',
-                  border: '1px solid rgba(3,130,183,0.15)',
-                  '&:hover': { backgroundColor: 'rgba(3,130,183,0.12)' },
+                  backgroundColor: 'rgba(3,183,146,0.06)',
+                  color: '#03B792',
+                  border: '1px solid rgba(3,183,146,0.15)',
+                  '&:hover': { backgroundColor: 'rgba(3,183,146,0.12)' },
                 }}
               />
             ))}
@@ -179,7 +215,7 @@ export default function ReportChat({ ticker }: ReportChatProps) {
           ))}
           {loading && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 5, mb: 1 }}>
-              <CircularProgress size={14} sx={{ color: '#0382B7' }} />
+              <CircularProgress size={14} sx={{ color: '#03B792' }} />
               <Typography variant="body2" sx={{ color: '#6B6760', fontSize: '0.8rem' }}>
                 Thinking...
               </Typography>
@@ -211,9 +247,9 @@ export default function ReportChat({ ticker }: ReportChatProps) {
             onClick={() => sendMessage(input)}
             disabled={!input.trim() || loading}
             sx={{
-              bgcolor: '#0382B7',
+              bgcolor: '#03B792',
               color: '#fff',
-              '&:hover': { bgcolor: '#026a96' },
+              '&:hover': { bgcolor: '#029574' },
               '&.Mui-disabled': { bgcolor: '#E8E4DB', color: '#B0ADA6' },
               width: 38,
               height: 38,
