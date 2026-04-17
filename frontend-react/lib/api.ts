@@ -49,8 +49,11 @@ export const getCAVMStatus = (taskId: string) =>
 export const fetchReportHistory = (ticker: string) =>
   api.get(`/api/report/history/${ticker}`).then(r => r.data);
 
+export const fetchAvailableReportTickers = (): Promise<string[]> =>
+  api.get(`/api/report/available-tickers`).then(r => r.data);
+
 // Chat
-export const askFinSage = (ticker: string, question: string) =>
+export const askFinSage = (ticker: string, question: string): Promise<{ answer: string; missing_tickers?: string[]; error?: string }> =>
   api.post(`/api/chat/ask`, { ticker, question }).then(r => r.data);
 
 // Observability
@@ -76,7 +79,7 @@ export const fetchQueryAttribution = () =>
   api.get(`/api/observability/query-attribution`).then(r => r.data);
 
 // Report Chat (conversational Q&A about generated reports)
-export const askReportChat = (ticker: string, sessionId: string, question: string, folderName?: string) =>
+export const askReportChat = (ticker: string, sessionId: string, question: string, folderName?: string): Promise<{ answer: string; missing_tickers?: string[] }> =>
   api.post(`/api/report_chat/ask`, { ticker, session_id: sessionId, question, folder_name: folderName ?? null }).then(r => r.data);
 
 export const resetReportChat = (sessionId: string) =>

@@ -381,18 +381,28 @@ export default function ReportPage() {
               connector={
                 <StepConnector
                   sx={{
+                    '@keyframes gradientFlow': {
+                      '0%': { backgroundPosition: '100% 0' },
+                      '100%': { backgroundPosition: '0% 0' },
+                    },
                     '& .MuiStepConnector-line': {
                       borderColor: '#C4BFB5',
                       borderTopStyle: 'dashed',
                       borderTopWidth: 3,
                     },
                     '&.Mui-active .MuiStepConnector-line': {
-                      borderColor: '#03B792',
-                      borderTopStyle: 'solid',
+                      border: 'none',
+                      height: 3,
+                      borderRadius: 1.5,
+                      background: 'linear-gradient(90deg, #03B792, #0382B7, #03B792)',
+                      backgroundSize: '200% 100%',
+                      animation: 'gradientFlow 2s ease-in-out infinite',
                     },
                     '&.Mui-completed .MuiStepConnector-line': {
-                      borderColor: '#0382B7',
-                      borderTopStyle: 'solid',
+                      border: 'none',
+                      height: 3,
+                      borderRadius: 1.5,
+                      background: 'linear-gradient(90deg, #03B792, #04C9A0)',
                     },
                   }}
                 />
@@ -405,17 +415,17 @@ export default function ReportPage() {
                       '& .MuiStepLabel-label': {
                         color:
                           cavmForTicker && i < cavm.stage
-                            ? '#0382B7'
-                            : cavmForTicker && i === cavm.stage && cavm.status === 'running'
                             ? '#03B792'
+                            : cavmForTicker && i === cavm.stage && cavm.status === 'running'
+                            ? '#0382B7'
                             : '#7A756F',
                         fontSize: '0.8rem',
                         fontWeight: cavmForTicker && i <= cavm.stage ? 600 : 500,
                       },
                       '& .MuiStepIcon-root': {
                         color: '#C4BFB5',
-                        '&.Mui-active': { color: '#03B792' },
-                        '&.Mui-completed': { color: '#0382B7' },
+                        '&.Mui-active': { color: '#0382B7' },
+                        '&.Mui-completed': { color: '#03B792' },
                       },
                     }}
                   >

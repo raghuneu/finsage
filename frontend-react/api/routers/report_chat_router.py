@@ -25,8 +25,8 @@ class ResetRequest(BaseModel):
 @router.post("/ask")
 def report_chat_ask(req: AskRequest, session=Depends(get_snowpark_session)):
     try:
-        answer = ask(session, req.session_id, req.ticker, req.question, req.folder_name)
-        return {"answer": answer}
+        result = ask(session, req.session_id, req.ticker, req.question, req.folder_name)
+        return result  # {answer: str, missing_tickers: list[str]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

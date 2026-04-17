@@ -15,8 +15,9 @@ import SendIcon from '@mui/icons-material/Send';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import { useTicker } from '@/lib/ticker-context';
-import { askFinSage } from '@/lib/api';
+import { askFinSage, fetchAvailableReportTickers } from '@/lib/api';
 import ChatMessage from '@/components/ChatMessage';
 
 interface Message {
@@ -30,6 +31,8 @@ export default function AskFinSagePage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missingTickers, setMissingTickers] = useState<string[]>([]);
+  const [availableTickers, setAvailableTickers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const suggestions = [
@@ -38,6 +41,21 @@ export default function AskFinSagePage() {
     `How has ${ticker}'s revenue trended?`,
     `Key takeaways from ${ticker}'s MD&A?`,
   ];
+
+  const otherAvailable = availableTickers.filter((t) => t !== ticker);
+  const comparisonSuggestions = otherAvailable.length > 0
+    ? [
+        `Compare ${ticker} vs ${otherAvailable[0]} revenue growth`,
+        `${ticker} vs ${otherAvailable[0]}: which has stronger fundamentals?`,
+      ]
+    : [];
+
+  // Fetch available report tickers on mount
+  useEffect(() => {
+    fetchAvailableReportTickers()
+      .then(setAvailableTickers)
+      .catch(() => {});
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,6 +68,7 @@ export default function AskFinSagePage() {
   useEffect(() => {
     setMessages([]);
     setError(null);
+    setMissingTickers([]);
   }, [ticker]);
 
   const sendMessage = async (text: string) => {
@@ -60,6 +79,7 @@ export default function AskFinSagePage() {
     setInput('');
     setLoading(true);
     setError(null);
+    setMissingTickers([]);
 
     try {
       const data = await askFinSage(ticker, text.trim());
@@ -74,6 +94,9 @@ export default function AskFinSagePage() {
           ...prev,
           { role: 'assistant', content: data.answer },
         ]);
+        if (data.missing_tickers && data.missing_tickers.length > 0) {
+          setMissingTickers(data.missing_tickers);
+        }
       }
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : 'Failed to get response';
@@ -104,13 +127,21 @@ export default function AskFinSagePage() {
         </Typography>
       </Box>
 
+      {/* Missing tickers alert */}
+      {missingTickers.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          No generated reports found for: <strong>{missingTickers.join(', ')}</strong>.
+          Generate reports for these tickers on the Report page to enable full comparison data.
+        </Alert>
+      )}
+
       {/* Suggestion pills */}
       {messages.length === 0 && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ color: '#6B6760', mb: 1.5, fontSize: '0.8rem' }}>
             Suggested questions
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
             {suggestions.map((s, i) => (
               <Chip
                 key={i}
@@ -131,6 +162,32 @@ export default function AskFinSagePage() {
               />
             ))}
           </Box>
+          {comparisonSuggestions.length > 0 && (
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+              <CompareArrowsIcon sx={{ fontSize: 16, color: '#0382B7' }} />
+              <Typography variant="caption" sx={{ color: '#6B6760', mr: 0.5 }}>
+                Compare stocks:
+              </Typography>
+              {comparisonSuggestions.map((s, i) => (
+                <Chip
+                  key={i}
+                  label={s}
+                  variant="outlined"
+                  onClick={() => sendMessage(s)}
+                  sx={{
+                    borderColor: 'rgba(3,130,183,0.2)',
+                    color: '#0382B7',
+                    cursor: 'pointer',
+                    fontSize: '0.8rem',
+                    '&:hover': {
+                      borderColor: '#0382B7',
+                      backgroundColor: 'rgba(3,130,183,0.05)',
+                    },
+                  }}
+                />
+              ))}
+            </Box>
+          )}
         </Box>
       )}
 
@@ -153,7 +210,7 @@ export default function AskFinSagePage() {
             }}
           >
             <Typography variant="body2" sx={{ color: '#9A9590' }}>
-              Ask a question about {ticker} to get started
+              Ask a question about {ticker} to get started{otherAvailable.length > 0 ? ' -- mention other tickers to compare' : ''}
             </Typography>
           </Box>
         )}
@@ -215,7 +272,7 @@ export default function AskFinSagePage() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TextField
             fullWidth
-            placeholder={`Ask about ${ticker}...`}
+            placeholder={`Ask about ${ticker}... (mention other tickers to compare)`}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -246,6 +303,7 @@ export default function AskFinSagePage() {
               onClick={() => {
                 setMessages([]);
                 setError(null);
+                setMissingTickers([]);
               }}
               sx={{ color: '#6B6760' }}
               title="Clear chat"

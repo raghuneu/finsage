@@ -200,6 +200,35 @@ def report_history(ticker: str):
     return results
 
 
+@router.get("/available-tickers")
+def available_report_tickers() -> List[str]:
+    """Return tickers that have at least one completed report (folder with a PDF)."""
+    outputs_dir = PROJECT_ROOT / "outputs"
+    if not outputs_dir.exists():
+        return []
+
+    tickers: set = set()
+    for folder in outputs_dir.iterdir():
+        if not folder.is_dir():
+            continue
+        parts = folder.name.split("_")
+        if len(parts) < 3:
+            continue
+        # Ticker is everything before the date segment (8-digit YYYYMMDD)
+        ticker_parts: list = []
+        for p in parts:
+            if len(p) == 8 and p.isdigit():
+                break
+            ticker_parts.append(p)
+        if not ticker_parts:
+            continue
+        candidate = "_".join(ticker_parts)
+        if list(folder.glob("*.pdf")):
+            tickers.add(candidate)
+
+    return sorted(tickers)
+
+
 @router.get("/download/{filename:path}")
 def download_report(filename: str):
     """Download a PDF report from the outputs directory."""
