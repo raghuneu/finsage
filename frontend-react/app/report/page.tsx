@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import {
   Box,
   Card,
@@ -21,9 +21,12 @@ import {
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DownloadIcon from '@mui/icons-material/Download';
+import HistoryIcon from '@mui/icons-material/History';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ReactMarkdown from 'react-markdown';
 import { useTicker } from '@/lib/ticker-context';
-import { generateQuickReport, startCAVMPipeline, getCAVMStatus } from '@/lib/api';
+import { useReport } from '@/lib/report-context';
+import type { ExistingReport } from '@/lib/report-context';
 import SectionHeader from '@/components/SectionHeader';
 import MetricCard from '@/components/MetricCard';
 import ReportChat from '@/components/ReportChat';
@@ -42,73 +45,22 @@ const CAVM_STAGES = ['Chart Agent', 'Validation', 'Analysis', 'Report'];
 
 export default function ReportPage() {
   const { ticker } = useTicker();
-  const [reportType, setReportType] = useState<'quick' | 'cavm-summary' | 'cavm'>('quick');
-  const [loading, setLoading] = useState(false);
-  const [quickResult, setQuickResult] = useState<string | null>(null);
-  const [quickError, setQuickError] = useState<string | null>(null);
-  const [cavm, setCavm] = useState<{
-    taskId: string | null;
-    stage: number;
-    status: string;
-    result: Record<string, unknown> | null;
-    error: string | null;
-  }>({ taskId: null, stage: 0, status: 'idle', result: null, error: null });
-  const [debugMode, setDebugMode] = useState(false);
-  const [skipCharts, setSkipCharts] = useState(false);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, []);
-
-  const handleQuickReport = () => {
-    setLoading(true);
-    setQuickResult(null);
-    setQuickError(null);
-    generateQuickReport(ticker)
-      .then((data) => {
-        if (data.error) setQuickError(data.error);
-        else setQuickResult(data.result);
-      })
-      .catch((e) => setQuickError(e.message))
-      .finally(() => setLoading(false));
-  };
-
-  const handleCAVMPipeline = () => {
-    const detailLevel = reportType === 'cavm-summary' ? 'summary' : 'detailed';
-    setCavm({ taskId: null, stage: 0, status: 'starting', result: null, error: null });
-    startCAVMPipeline(ticker, debugMode, skipCharts, detailLevel)
-      .then((data) => {
-        if (data.task_id) {
-          setCavm((prev) => ({ ...prev, taskId: data.task_id, status: 'running' }));
-          // Start polling
-          pollingRef.current = setInterval(() => {
-            getCAVMStatus(data.task_id)
-              .then((status) => {
-                setCavm((prev) => ({
-                  ...prev,
-                  stage: status.stage || prev.stage,
-                  status: status.status,
-                }));
-                if (status.status === 'completed') {
-                  setCavm((prev) => ({ ...prev, result: status.result }));
-                  if (pollingRef.current) clearInterval(pollingRef.current);
-                } else if (status.status === 'failed') {
-                  setCavm((prev) => ({ ...prev, error: status.error }));
-                  if (pollingRef.current) clearInterval(pollingRef.current);
-                }
-              })
-              .catch(() => {});
-          }, 5000);
-        }
-      })
-      .catch((e) => {
-        setCavm((prev) => ({ ...prev, status: 'failed', error: e.message }));
-      });
-  };
+  const {
+    reportType,
+    setReportType,
+    quickLoading,
+    quickResult,
+    quickError,
+    quickTicker,
+    startQuickReport,
+    cavm,
+    skipCharts,
+    setSkipCharts,
+    startCAVM,
+    existingReports,
+    existingReportsLoading,
+    loadReportHistory,
+  } = useReport();
 
   const downloadMarkdown = () => {
     if (!quickResult) return;
@@ -116,13 +68,63 @@ export default function ReportPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${ticker}_research_report.md`;
+    a.download = `${quickTicker || ticker}_research_report.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
+  // Show quick report results only if they belong to the current ticker
+  const showQuickResult = quickResult && quickTicker === ticker;
+  const showQuickError = quickError && quickTicker === ticker;
+  const isQuickLoading = quickLoading && quickTicker === ticker;
+
+  // Show CAVM state only if it belongs to the current ticker
+  const cavmForTicker = cavm.ticker === ticker;
+  const cavmRunning = cavm.status === 'running' || cavm.status === 'starting';
+
+  // Load report history when ticker changes
+  useEffect(() => {
+    if (ticker) loadReportHistory(ticker);
+  }, [ticker, loadReportHistory]);
+
+  // Reload report history when a CAVM pipeline completes
+  useEffect(() => {
+    if (cavm.status === 'completed' && cavm.ticker) {
+      loadReportHistory(cavm.ticker);
+    }
+  }, [cavm.status, cavm.ticker, loadReportHistory]);
+
+  // Filter existing reports by detail level for the relevant card
+  const summaryReports = existingReports.filter((r: ExistingReport) => r.detail_level === 'summary');
+  const fullReports = existingReports.filter((r: ExistingReport) => r.detail_level === 'full');
+
+  const formatReportDate = (isoDate: string | null) => {
+    if (!isoDate) return 'Unknown date';
+    try {
+      const d = new Date(isoDate);
+      return d.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch { return isoDate; }
+  };
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
   return (
     <Box>
+      {/* Banner when a pipeline is running for a different ticker */}
+      {cavmRunning && !cavmForTicker && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          A CAVM pipeline is currently running for <strong>{cavm.ticker}</strong>. Wait for it to finish before starting a new one.
+        </Alert>
+      )}
+      {quickLoading && !isQuickLoading && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          A Quick Report is currently generating for <strong>{quickTicker}</strong>.
+        </Alert>
+      )}
+
       {/* Report Section Pills */}
       <Card sx={{ mb: 3, borderLeft: '3px solid #03B792' }}>
         <CardContent>
@@ -213,6 +215,34 @@ export default function ReportPage() {
                 CAVM pipeline with charts and condensed analysis. Produces an 8-10 page branded PDF
                 with key insights only. Typically takes 3-8 minutes.
               </Typography>
+              {summaryReports.length > 0 && (
+                <Box sx={{ mt: 1.5, p: 1.5, backgroundColor: 'rgba(3,183,146,0.06)', borderRadius: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                    <HistoryIcon sx={{ fontSize: 14, color: '#03B792' }} />
+                    <Typography variant="caption" sx={{ color: '#03B792', fontWeight: 600, fontSize: '0.7rem', letterSpacing: '0.03em' }}>
+                      {summaryReports.length} previous report{summaryReports.length > 1 ? 's' : ''} found
+                    </Typography>
+                  </Box>
+                  <Typography variant="caption" sx={{ color: '#6B6760', display: 'block', mb: 0.75 }}>
+                    Latest: {formatReportDate(summaryReports[0].run_at)}
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
+                    href={`${apiBase}/api/report/download/${encodeURIComponent(summaryReports[0].pdf_path)}`}
+                    target="_blank"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    sx={{
+                      fontSize: '0.7rem', py: 0.25, px: 1,
+                      borderColor: 'rgba(3,183,146,0.3)', color: '#03B792',
+                      '&:hover': { borderColor: '#03B792', backgroundColor: 'rgba(3,183,146,0.08)' },
+                    }}
+                  >
+                    View Previous Report
+                  </Button>
+                </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -242,6 +272,34 @@ export default function ReportPage() {
                 Generates a branded 15-20 page PDF with VLM-refined charts, chain-of-analysis validation,
                 and an investment thesis. Typically takes 5-15 minutes.
               </Typography>
+              {fullReports.length > 0 && (
+                <Box sx={{ mt: 1.5, p: 1.5, backgroundColor: 'rgba(3,183,146,0.06)', borderRadius: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                    <HistoryIcon sx={{ fontSize: 14, color: '#03B792' }} />
+                    <Typography variant="caption" sx={{ color: '#03B792', fontWeight: 600, fontSize: '0.7rem', letterSpacing: '0.03em' }}>
+                      {fullReports.length} previous report{fullReports.length > 1 ? 's' : ''} found
+                    </Typography>
+                  </Box>
+                  <Typography variant="caption" sx={{ color: '#6B6760', display: 'block', mb: 0.75 }}>
+                    Latest: {formatReportDate(fullReports[0].run_at)}
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
+                    href={`${apiBase}/api/report/download/${encodeURIComponent(fullReports[0].pdf_path)}`}
+                    target="_blank"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    sx={{
+                      fontSize: '0.7rem', py: 0.25, px: 1,
+                      borderColor: 'rgba(3,183,146,0.3)', color: '#03B792',
+                      '&:hover': { borderColor: '#03B792', backgroundColor: 'rgba(3,183,146,0.08)' },
+                    }}
+                  >
+                    View Previous Report
+                  </Button>
+                </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -252,17 +310,17 @@ export default function ReportPage() {
         <Box>
           <Button
             variant="contained"
-            onClick={handleQuickReport}
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={16} /> : <PlayArrowIcon />}
+            onClick={() => startQuickReport(ticker)}
+            disabled={quickLoading}
+            startIcon={isQuickLoading ? <CircularProgress size={16} /> : <PlayArrowIcon />}
             sx={{ mb: 2 }}
           >
-            {loading ? 'Generating...' : 'Generate Quick Report'}
+            {isQuickLoading ? 'Generating...' : quickLoading ? `Generating for ${quickTicker}...` : 'Generate Quick Report'}
           </Button>
 
-          {quickError && <Alert severity="error" sx={{ mb: 2 }}>{quickError}</Alert>}
+          {showQuickError && <Alert severity="error" sx={{ mb: 2 }}>{quickError}</Alert>}
 
-          {quickResult && (
+          {showQuickResult && (
             <Card sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <SectionHeader title="Report" />
@@ -291,7 +349,7 @@ export default function ReportPage() {
           {/* Pipeline stepper */}
           <Card sx={{ mb: 3, p: 2 }}>
             <Stepper
-              activeStep={cavm.stage}
+              activeStep={cavmForTicker ? cavm.stage : 0}
               alternativeLabel
               connector={
                 <StepConnector
@@ -310,18 +368,23 @@ export default function ReportPage() {
               }
             >
               {CAVM_STAGES.map((label, i) => (
-                <Step key={label} completed={i < cavm.stage}>
+                <Step key={label} completed={cavmForTicker && i < cavm.stage}>
                   <StepLabel
                     sx={{
                       '& .MuiStepLabel-label': {
                         color:
-                          i < cavm.stage
+                          cavmForTicker && i < cavm.stage
                             ? '#03B792'
-                            : i === cavm.stage && cavm.status === 'running'
-                            ? '#0382B7'
+                            : cavmForTicker && i === cavm.stage && cavm.status === 'running'
+                            ? '#03B792'
                             : '#7A756F',
                         fontSize: '0.8rem',
-                        fontWeight: i <= cavm.stage ? 600 : 500,
+                        fontWeight: cavmForTicker && i <= cavm.stage ? 600 : 500,
+                      },
+                      '& .MuiStepIcon-root': {
+                        color: '#C4BFB5',
+                        '&.Mui-active': { color: '#03B792' },
+                        '&.Mui-completed': { color: '#03B792' },
                       },
                     }}
                   >
@@ -332,19 +395,94 @@ export default function ReportPage() {
             </Stepper>
           </Card>
 
+          {/* Activity Feed — live messages during pipeline execution */}
+          {cavmForTicker && cavmRunning && cavm.messages.length > 0 && (
+            <Box
+              sx={{
+                mb: 3,
+                px: 2.5,
+                py: 2,
+                backgroundColor: 'rgba(244,242,237,0.5)',
+                borderLeft: '2px solid #E8E4DB',
+                borderRadius: '0 6px 6px 0',
+                maxHeight: 220,
+                overflowY: 'auto',
+                '&::-webkit-scrollbar': { width: 4 },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: '#C4BFB5',
+                  borderRadius: 2,
+                },
+                '@keyframes slideUpFade': {
+                  '0%': { opacity: 0, transform: 'translateY(8px)' },
+                  '100%': { opacity: 1, transform: 'translateY(0)' },
+                },
+                '@keyframes pulseGlow': {
+                  '0%, 100%': { opacity: 0.4 },
+                  '50%': { opacity: 1 },
+                },
+              }}
+            >
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#7A756F',
+                  fontWeight: 600,
+                  fontSize: '0.65rem',
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  mb: 1,
+                  display: 'block',
+                }}
+              >
+                Activity
+              </Typography>
+              {cavm.messages.map((msg, idx) => {
+                const isLatest = idx === cavm.messages.length - 1;
+                return (
+                  <Box
+                    key={`${idx}-${msg}`}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 1,
+                      py: 0.5,
+                      animation: 'slideUpFade 0.35s ease-out both',
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        backgroundColor: isLatest ? '#03B792' : '#C4BFB5',
+                        mt: '5px',
+                        flexShrink: 0,
+                        ...(isLatest && {
+                          animation: 'pulseGlow 1.5s ease-in-out infinite',
+                        }),
+                      }}
+                    />
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: isLatest ? '#2C2A25' : '#6B6760',
+                        fontFamily: '"DM Sans", sans-serif',
+                        fontStyle: 'italic',
+                        fontSize: '0.8rem',
+                        lineHeight: 1.5,
+                        transition: 'color 0.3s ease',
+                      }}
+                    >
+                      {msg}
+                    </Typography>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+
           {/* Options */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={debugMode}
-                  onChange={(e) => setDebugMode(e.target.checked)}
-                  size="small"
-                  sx={{ color: '#6B6760', '&.Mui-checked': { color: '#03B792' } }}
-                />
-              }
-              label={<Typography variant="body2" sx={{ color: '#6B6760' }}>Debug mode</Typography>}
-            />
             <FormControlLabel
               control={
                 <Checkbox
@@ -360,27 +498,39 @@ export default function ReportPage() {
 
           <Button
             variant="contained"
-            onClick={handleCAVMPipeline}
-            disabled={cavm.status === 'running' || cavm.status === 'starting'}
+            onClick={() => startCAVM(ticker, reportType)}
+            disabled={cavmRunning}
             startIcon={
-              cavm.status === 'running' || cavm.status === 'starting' ? (
+              cavmRunning && cavmForTicker ? (
                 <CircularProgress size={16} />
               ) : (
                 <PlayArrowIcon />
               )
             }
-            sx={{ mb: 2 }}
+            sx={{
+              mb: 2,
+              ...(cavmRunning && {
+                '@keyframes pulseBtn': {
+                  '0%, 100%': { opacity: 0.75 },
+                  '50%': { opacity: 1 },
+                },
+                animation: 'pulseBtn 2s ease-in-out infinite',
+                pointerEvents: 'none',
+              }),
+            }}
           >
-            {cavm.status === 'running'
+            {cavmRunning && cavmForTicker
               ? 'Pipeline Running...'
+              : cavmRunning
+              ? `Pipeline Running for ${cavm.ticker}...`
               : reportType === 'cavm-summary'
               ? 'Generate Summary PDF Report'
               : 'Generate Full PDF Report'}
           </Button>
 
-          {cavm.error && <Alert severity="error" sx={{ mb: 2 }}>{cavm.error}</Alert>}
+          {cavmForTicker && cavm.error && <Alert severity="error" sx={{ mb: 2 }}>{cavm.error}</Alert>}
 
-          {cavm.result && (
+          {cavmForTicker && cavm.result && (
             <Box>
               <Alert severity="success" sx={{ mb: 2 }}>
                 PDF report generated successfully!
@@ -395,16 +545,21 @@ export default function ReportPage() {
                 <Grid size={{ xs: 4 }}>
                   <MetricCard
                     title="Total Time"
-                    value={`${Number((cavm.result as Record<string, unknown>).elapsed_seconds || 0).toFixed(0)}s`}
+                    value={(() => {
+                      const totalSec = Number((cavm.result as Record<string, unknown>).elapsed_seconds || 0);
+                      const m = Math.floor(totalSec / 60);
+                      const s = Math.round(totalSec % 60);
+                      return m > 0 ? `${m}m ${s}s` : `${s}s`;
+                    })()}
                   />
                 </Grid>
               </Grid>
 
-              {cavm.result && String((cavm.result as Record<string, unknown>).pdf_path) && (
+              {String((cavm.result as Record<string, unknown>).pdf_path) && (
                 <Button
                   variant="contained"
                   startIcon={<DownloadIcon />}
-                  href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/report/download/${encodeURIComponent(String((cavm.result as Record<string, unknown>).pdf_path))}`}
+                  href={`${apiBase}/api/report/download/${encodeURIComponent(String((cavm.result as Record<string, unknown>).pdf_path))}`}
                   target="_blank"
                 >
                   Download PDF Report
