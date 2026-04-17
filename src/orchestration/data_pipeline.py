@@ -41,7 +41,7 @@ def load_tickers():
 
 def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
                  load_news=True, load_sec=True, load_xbrl=True,
-                 load_s3_filings=False, run_dbt=False):
+                 load_s3_filings=None, run_dbt=False):
     """
     Run complete data collection pipeline
 
@@ -52,9 +52,12 @@ def run_pipeline(tickers=None, load_stocks=True, load_fundamentals=True,
         load_news: Load news articles (requires NewsAPI key)
         load_sec: Load SEC filings (10-K, 10-Q)
         load_xbrl: Load XBRL structured financial data
-        load_s3_filings: Download SEC filings to S3 + extract text (requires AWS credentials)
+        load_s3_filings: Download SEC filings to S3 + extract text (requires AWS credentials).
+            Defaults to FINSAGE_LOAD_S3_FILINGS env var, or False if unset.
         run_dbt: Run dbt transformations after loading
     """
+    if load_s3_filings is None:
+        load_s3_filings = os.getenv('FINSAGE_LOAD_S3_FILINGS', 'false').lower() == 'true'
     logger.info("="*60)
     logger.info("🚀 FinSage Data Collection Pipeline Starting")
     logger.info("="*60)
