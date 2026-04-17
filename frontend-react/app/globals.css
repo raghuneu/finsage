@@ -2,12 +2,12 @@
 
 :root {
   --bg-deepest: #F2F0EB;
-  --bg-default: #FAFAF7;
+  --bg-default: #F4F2ED;
   --bg-paper: #FFFFFF;
   --border: #E8E4DB;
   --blue: #0382B7;
   --green: #9DCBB8;
-  --pink: #C96BAE;
+  --pink: #03B792;
   --red: #E58B6D;
   --topaz: #F8CB86;
   --cream: #EBE1B2;
@@ -33,7 +33,7 @@ body::before {
   inset: 0;
   z-index: -2;
   background:
-    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(201,107,174,0.03) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(3,183,146,0.03) 0%, transparent 60%),
     radial-gradient(ellipse 60% 50% at 80% 90%, rgba(3,130,183,0.02) 0%, transparent 50%);
   pointer-events: none;
 }
@@ -108,7 +108,7 @@ body::before {
 
 /* Utility glow classes */
 .glow-pink {
-  box-shadow: 0 0 20px rgba(201,107,174,0.12);
+  box-shadow: 0 0 20px rgba(3,183,146,0.12);
 }
 .glow-blue {
   box-shadow: 0 0 20px rgba(3,130,183,0.12);

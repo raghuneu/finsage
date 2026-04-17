@@ -6,11 +6,12 @@ import { Box, Typography } from '@mui/material';
 interface SectionHeaderProps {
   title: string;
   subtitle?: string;
+  accentColor?: string;
 }
 
-export default function SectionHeader({ title, subtitle }: SectionHeaderProps) {
+export default function SectionHeader({ title, subtitle, accentColor = '#03B792' }: SectionHeaderProps) {
   return (
-    <Box sx={{ borderLeft: '3px solid #C96BAE', pl: 2, mb: 2 }}>
+    <Box sx={{ borderLeft: `3px solid ${accentColor}`, pl: 2, mb: 2 }}>
       <Typography
         variant="h6"
         sx={{

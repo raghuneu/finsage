@@ -114,7 +114,7 @@ export default function SECFilingPage() {
       <Card
         sx={{
           mb: 3,
-          borderLeft: '3px solid #C96BAE',
+          borderLeft: '3px solid #03B792',
         }}
       >
         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>

@@ -1,5 +1,7 @@
 """Report Chat Router — conversational Q&A about generated reports via Snowflake Cortex."""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -13,6 +15,7 @@ class AskRequest(BaseModel):
     session_id: str
     ticker: str
     question: str
+    folder_name: Optional[str] = None
 
 
 class ResetRequest(BaseModel):
@@ -22,8 +25,8 @@ class ResetRequest(BaseModel):
 @router.post("/ask")
 def report_chat_ask(req: AskRequest, session=Depends(get_snowpark_session)):
     try:
-        answer = ask(session, req.session_id, req.ticker, req.question)
-        return {"answer": answer}
+        result = ask(session, req.session_id, req.ticker, req.question, req.folder_name)
+        return result  # {answer: str, missing_tickers: list[str]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

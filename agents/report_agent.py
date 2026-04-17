@@ -801,7 +801,8 @@ def build_executive_summary(ticker: str, charts: list,
 
 
 def build_chart_section(chart: dict, analysis_text: str,
-                         styles: dict, chart_number: int = 0) -> list:
+                         styles: dict, chart_number: int = 0,
+                         detail_level: str = "detailed") -> list:
     """Build one chart section on a dedicated page: teal header bar + chart image + analysis + key metrics."""
     elements = []
 
@@ -878,7 +879,7 @@ def build_chart_section(chart: dict, analysis_text: str,
     ))
 
     # ── Key metrics from data_summary (inline table) ─────────
-    if data_summary:
+    if data_summary and detail_level != "summary":
         metric_items = []
         for k, v in data_summary.items():
             label = k.replace("_", " ").title()
@@ -1630,6 +1631,7 @@ def build_pdf(
     analysis: dict,
     output_path: str,
     company_name: str = None,
+    detail_level: str = "detailed",
 ) -> str:
     """
     Assemble the full FinSage PDF report.
@@ -1641,6 +1643,8 @@ def build_pdf(
                         {chart_analyses: [...], mda_summary: str, risk_summary: str}
         output_path:  Full path for output PDF file
         company_name: Optional display name (defaults to ticker)
+        detail_level: "detailed" for full 15-20 page report,
+                      "summary" for condensed 8-10 page report
 
     Returns:
         output_path (str)
@@ -1681,7 +1685,9 @@ def build_pdf(
     )
     content_frame = Frame(
         MARGIN, 14 * mm,
-        PAGE_W - 2 * MARGIN, PAGE_H - 28 * mm,
+        PAGE_W - 2 * MARGIN, PAGE_H - 32 * mm,
+        topPadding=4 * mm,
+        bottomPadding=2 * mm,
         id="content"
     )
 
@@ -1697,10 +1703,11 @@ def build_pdf(
 
     # Page 1: Cover (with Buy/Hold/Sell rating)
     elements.append(NextPageTemplate("Cover"))
-    elements += build_cover(ticker, company_name, styles, sig, charts=charts)
-
-    # Switch to content template
-    elements.append(NextPageTemplate("Content"))
+    cover_elems = build_cover(ticker, company_name, styles, sig, charts=charts)
+    # Insert template switch BEFORE the PageBreak that ends the cover,
+    # so the TOC page uses the Content template (not Cover).
+    cover_elems.insert(-1, NextPageTemplate("Content"))
+    elements += cover_elems
 
     # Page 2: Table of Contents
     elements += build_toc(charts, styles)
@@ -1724,10 +1731,13 @@ def build_pdf(
             chart_id,
             "Analysis not available for this chart."
         )
-        elements += build_chart_section(chart, analysis_text, styles, chart_number=i)
+        elements += build_chart_section(chart, analysis_text, styles,
+                                        chart_number=i,
+                                        detail_level=detail_level)
 
-    # Pages 12-13: Financial Metrics Summary
-    elements += build_financial_metrics_page(charts, styles)
+    # Pages 12-13: Financial Metrics Summary (skip in summary mode)
+    if detail_level != "summary":
+        elements += build_financial_metrics_page(charts, styles)
 
     # Page 14: Peer Comparison
     elements += build_peer_comparison(ticker, analysis, styles)
@@ -1742,8 +1752,9 @@ def build_pdf(
     # Page 17: Investment Recommendation
     elements += build_recommendation_page(ticker, charts, analysis, styles)
 
-    # Pages 18-19: Appendix
-    elements += build_appendix(ticker, charts, styles)
+    # Pages 18-19: Appendix (skip in summary mode)
+    if detail_level != "summary":
+        elements += build_appendix(ticker, charts, styles)
 
     # ── Build PDF ────────────────────────────────────────────
     logger.info("Building PDF: %s", output_path)
@@ -1764,16 +1775,18 @@ def generate_report(
     analysis: dict,
     output_dir: str = None,
     company_name: str = None,
+    detail_level: str = "detailed",
 ) -> str:
     """
     Generate the FinSage PDF report.
 
     Args:
-        ticker:      Stock ticker symbol
-        charts:      Validated ChartResult list from chart_agent
-        analysis:    Output from analysis_agent.run_analysis()
-        output_dir:  Directory to save PDF (defaults to outputs/)
+        ticker:       Stock ticker symbol
+        charts:       Validated ChartResult list from chart_agent
+        analysis:     Output from analysis_agent.run_analysis()
+        output_dir:   Directory to save PDF (defaults to outputs/)
         company_name: Display name for cover page
+        detail_level: "detailed" for full report, "summary" for condensed
 
     Returns:
         Full path to generated PDF
@@ -1784,11 +1797,12 @@ def generate_report(
     os.makedirs(output_dir, exist_ok=True)
 
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{ticker}_FinSage_Report_{date_str}.pdf"
+    suffix = "_Summary" if detail_level == "summary" else ""
+    filename = f"{ticker}_FinSage_Report{suffix}_{date_str}.pdf"
     output_path = os.path.join(output_dir, filename)
 
     logger.info("═" * 50)
-    logger.info("Report Agent starting for %s", ticker)
+    logger.info("Report Agent starting for %s (detail_level=%s)", ticker, detail_level)
     logger.info("Output: %s", output_path)
     logger.info("═" * 50)
 
@@ -1798,6 +1812,7 @@ def generate_report(
         analysis=analysis,
         output_path=output_path,
         company_name=company_name,
+        detail_level=detail_level,
     )
 
 
