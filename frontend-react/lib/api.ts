@@ -40,8 +40,8 @@ export const analyzeFilings = (ticker: string, mode: string) =>
 export const generateQuickReport = (ticker: string) =>
   api.post(`/api/report/quick`, { ticker }).then(r => r.data);
 
-export const startCAVMPipeline = (ticker: string, debug = false, skipCharts = false) =>
-  api.post(`/api/report/cavm`, { ticker, debug, skip_charts: skipCharts }).then(r => r.data);
+export const startCAVMPipeline = (ticker: string, debug = false, skipCharts = false, detailLevel = 'detailed') =>
+  api.post(`/api/report/cavm`, { ticker, debug, skip_charts: skipCharts, detail_level: detailLevel }).then(r => r.data);
 
 export const getCAVMStatus = (taskId: string) =>
   api.get(`/api/report/cavm/status/${taskId}`).then(r => r.data);

@@ -72,7 +72,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             width: 28,
             height: 2,
             borderRadius: 1,
-            background: 'linear-gradient(90deg, #C96BAE 0%, #0382B7 60%, transparent 100%)',
+            background: 'linear-gradient(90deg, #03B792 0%, #0382B7 60%, transparent 100%)',
           }}
         />
         <Typography
@@ -176,11 +176,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 borderRadius: 1.5,
                 mb: 0.5,
                 py: 0.75,
-                backgroundColor: isActive ? 'rgba(201,107,174,0.06)' : 'transparent',
-                borderLeft: isActive ? '3px solid #C96BAE' : '3px solid transparent',
+                backgroundColor: isActive ? 'rgba(3,183,146,0.06)' : 'transparent',
+                borderLeft: isActive ? '3px solid #03B792' : '3px solid transparent',
                 '&:hover': {
                   backgroundColor: isActive
-                    ? 'rgba(201,107,174,0.08)'
+                    ? 'rgba(3,183,146,0.08)'
                     : 'rgba(0,0,0,0.03)',
                 },
               }}
@@ -188,7 +188,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <ListItemIcon
                 sx={{
                   minWidth: 34,
-                  color: isActive ? '#C96BAE' : '#9A9590',
+                  color: isActive ? '#03B792' : '#9A9590',
                   '& .MuiSvgIcon-root': { fontSize: '1.15rem' },
                 }}
               >
@@ -201,7 +201,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     sx: {
                       fontSize: '0.82rem',
                       fontWeight: isActive ? 600 : 400,
-                  color: isActive ? '#C96BAE' : '#9A9590',
+                      color: isActive ? '#03B792' : '#9A9590',
                       letterSpacing: '0.01em',
                     },
                   },

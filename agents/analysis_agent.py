@@ -319,6 +319,118 @@ Write in third person, professional tone. Do not use bullet points or headers.
 
 
 # ──────────────────────────────────────────────────────────────
+# Summary-mode prompt templates (shorter output for condensed PDF)
+# ──────────────────────────────────────────────────────────────
+CHART_PROMPTS_SUMMARY = {
+    "price_sma": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of the stock price
+and moving average data for {ticker}. Cover the dominant trend direction and the key actionable
+implication. Reference specific price levels.
+
+Data:
+- Current Price: ${current_price}
+- 7-Day SMA: ${sma_7d}
+- 30-Day SMA: ${sma_30d}
+- 90-Day SMA: ${sma_90d}
+- Trend Signal: {trend_signal}
+- Date Range: {date_range}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "volatility": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of the volume and
+volatility profile for {ticker}. Focus on current volatility level and risk characterization.
+
+Data:
+- Average Daily Volume: {avg_volume:,}
+- 30-Day Volatility: {volatility_30d_pct}%
+- Average Daily Range: {daily_range_pct_avg}%
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "revenue_growth": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of revenue and
+net income growth for {ticker}. Focus on the growth trajectory and earnings quality signal.
+
+Data:
+- Latest Revenue Growth (YoY): {latest_revenue_growth_yoy}%
+- Latest Net Income Growth (YoY): {latest_net_income_growth_yoy}%
+- Fundamental Signal: {fundamental_signal}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "eps_trend": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of earnings per
+share data for {ticker}. Focus on EPS level and momentum direction.
+
+Data:
+- Latest EPS: ${latest_eps}
+- EPS Growth (YoY): {eps_growth_yoy_pct}%
+- EPS Growth (QoQ): {eps_growth_qoq_pct}%
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "sentiment": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of news sentiment
+for {ticker}. Focus on the current sentiment level and whether it aligns with fundamentals.
+
+Data:
+- 7-Day Average Sentiment Score: {sentiment_score_7d_avg} (scale: -1 bearish to +1 bullish)
+- Sentiment Label: {sentiment_label}
+- Sentiment Trend: {sentiment_trend}
+- Total Articles (Last 30 Days): {total_articles_30d}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "financial_health": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of the financial
+health of {ticker}. Focus on profitability and leverage.
+
+Data:
+- Total Revenue: ${total_revenue:,.0f}
+- Net Margin: {net_margin_pct}%
+- Operating Margin: {operating_margin_pct}%
+- Debt-to-Equity Ratio: {debt_to_equity_ratio}
+- Financial Health Rating: {financial_health}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "margin_trend": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of the profitability
+margin trend for {ticker}. Focus on whether margins are expanding or compressing.
+
+Data:
+- Quarters Covered: {num_quarters}
+- Latest Net Margin: {latest_net_margin_pct}%
+- Latest Operating Margin: {latest_operating_margin_pct}%
+- Margin Trend: {margin_trend}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+
+    "balance_sheet": """
+You are a senior equity research analyst. Write a concise 2-3 sentence summary of the balance
+sheet composition for {ticker}. Focus on leverage and financial flexibility.
+
+Data:
+- Total Assets: ${total_assets_b}B
+- Total Liabilities: ${total_liabilities_b}B
+- Stockholders' Equity: ${stockholders_equity_b}B
+- Equity as % of Assets: {equity_pct}%
+- Quarters Covered: {num_quarters}
+
+Write in third person, professional tone. Do not use bullet points or headers.
+""",
+}
+
+
+# ──────────────────────────────────────────────────────────────
 # Cortex helpers
 # ──────────────────────────────────────────────────────────────
 def _cortex_complete(session: Session, prompt: str) -> str:
@@ -366,17 +478,23 @@ def _cortex_summarize(session: Session, text: str) -> str:
 # Chart analysis
 # ──────────────────────────────────────────────────────────────
 def analyze_chart(session: Session, chart: dict, ticker: str,
-                  prior_analyses: list = None) -> dict:
+                  prior_analyses: list = None,
+                  detail_level: str = "detailed") -> dict:
     """
     Generate a written analysis paragraph for a single validated chart.
     Supports Chain-of-Analysis: prior analyses provide cross-referencing context.
     Optionally enriched with SEC filing context from Bedrock KB (Integration 2).
     Output validated by Guardrails (Integration 1).
+
+    Args:
+        detail_level: "detailed" for full 4-6 sentence analysis,
+                      "summary" for concise 2-3 sentence analysis.
     """
     chart_id = chart["chart_id"]
     data_summary = chart.get("data_summary", {})
 
-    prompt_template = CHART_PROMPTS.get(chart_id)
+    prompts = CHART_PROMPTS_SUMMARY if detail_level == "summary" else CHART_PROMPTS
+    prompt_template = prompts.get(chart_id) or CHART_PROMPTS.get(chart_id)
     if not prompt_template:
         logger.warning("No prompt template for chart_id '%s', skipping", chart_id)
         return {
@@ -451,13 +569,15 @@ def analyze_chart(session: Session, chart: dict, ticker: str,
         }
 
 
-def analyze_all_charts(session: Session, charts: list, ticker: str) -> list:
+def analyze_all_charts(session: Session, charts: list, ticker: str,
+                       detail_level: str = "detailed") -> list:
     """
     Generate analysis for all validated charts using Chain-of-Analysis.
     Charts are analyzed in canonical order so each analysis can
     cross-reference prior findings progressively.
     """
-    logger.info("Starting Chain-of-Analysis for %s (%d charts)", ticker, len(charts))
+    logger.info("Starting Chain-of-Analysis for %s (%d charts, detail_level=%s)",
+                ticker, len(charts), detail_level)
 
     ordered = sorted(
         charts,
@@ -472,7 +592,8 @@ def analyze_all_charts(session: Session, charts: list, ticker: str) -> list:
         if not chart.get("validated", True):
             logger.warning("Skipping unvalidated chart: %s", chart.get("chart_id"))
             continue
-        analysis = analyze_chart(session, chart, ticker, prior_analyses=analyses)
+        analysis = analyze_chart(session, chart, ticker, prior_analyses=analyses,
+                                 detail_level=detail_level)
         analyses.append(analysis)
 
     logger.info("Completed Chain-of-Analysis for %d/%d charts", len(analyses), len(charts))
@@ -612,7 +733,8 @@ def summarize_sec_filings(session: Session, ticker: str) -> dict:
 # ──────────────────────────────────────────────────────────────
 # Investment thesis synthesis (Integration 3: Multi-Model)
 # ──────────────────────────────────────────────────────────────
-def synthesize_analyses(session: Session, analyses: list, ticker: str) -> str:
+def synthesize_analyses(session: Session, analyses: list, ticker: str,
+                        detail_level: str = "detailed") -> str:
     """
     Generate an overall investment thesis synthesizing all individual chart analyses.
 
@@ -629,17 +751,27 @@ def synthesize_analyses(session: Session, analyses: list, ticker: str) -> str:
         f"[{a['title']}]: {a['analysis_text']}" for a in analyses
     )
 
-    thesis_question = (
-        f"Synthesize the following individual analyses for {ticker} into a cohesive "
-        f"investment thesis of 6-8 sentences structured as follows: "
-        f"(1) Open with the dominant narrative — is this a growth, value, or transitional story? "
-        f"(2) Summarize the bull case in 1-2 sentences citing specific metrics from the analyses. "
-        f"(3) Summarize the bear case or key risks in 1-2 sentences. "
-        f"(4) Note any contradictions between technical, fundamental, and sentiment signals. "
-        f"(5) Conclude with a forward-looking outlook and conviction level (high/moderate/low). "
-        f"Do not use bullet points or headers. Write in third person, professional tone. "
-        f"Every sentence must reference specific data from the analyses below."
-    )
+    if detail_level == "summary":
+        thesis_question = (
+            f"Synthesize the following individual analyses for {ticker} into a concise "
+            f"investment thesis of 3-4 sentences: (1) the dominant narrative (growth, value, "
+            f"or transitional), (2) the key bull and bear arguments in one sentence each, "
+            f"(3) a forward-looking conviction level (high/moderate/low). "
+            f"Do not use bullet points or headers. Write in third person, professional tone. "
+            f"Reference specific data from the analyses below."
+        )
+    else:
+        thesis_question = (
+            f"Synthesize the following individual analyses for {ticker} into a cohesive "
+            f"investment thesis of 6-8 sentences structured as follows: "
+            f"(1) Open with the dominant narrative — is this a growth, value, or transitional story? "
+            f"(2) Summarize the bull case in 1-2 sentences citing specific metrics from the analyses. "
+            f"(3) Summarize the bear case or key risks in 1-2 sentences. "
+            f"(4) Note any contradictions between technical, fundamental, and sentiment signals. "
+            f"(5) Conclude with a forward-looking outlook and conviction level (high/moderate/low). "
+            f"Do not use bullet points or headers. Write in third person, professional tone. "
+            f"Every sentence must reference specific data from the analyses below."
+        )
 
     # Integration 3: Try multi-model consensus first
     mm = _get_multi_model()
@@ -796,7 +928,8 @@ def _query_company_facts(session: Session, ticker: str) -> dict:
     return facts
 
 
-def generate_company_overview(session: Session, ticker: str) -> dict:
+def generate_company_overview(session: Session, ticker: str,
+                              detail_level: str = "detailed") -> dict:
     """
     Generate a Company Overview section for the PDF report.
 
@@ -835,16 +968,24 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
     )
 
     # AI-generated company description via Cortex
-    prompt = (
-        f"Write a comprehensive 6-8 sentence company overview for {ticker} suitable for "
-        f"an institutional equity research report. Cover:\n"
-        f"1. Core business description and key products/services\n"
-        f"2. Total addressable market (TAM) and industry positioning\n"
-        f"3. Competitive advantages and moats (brand, ecosystem, IP, scale)\n"
-        f"4. Key growth drivers and strategic initiatives\n"
-        f"Key facts: Market cap {mc_str}, P/E ratio {pe_str}, net margin {margin_str}. "
-        f"Write in third person, professional tone. Do not use bullet points or headers."
-    )
+    if detail_level == "summary":
+        prompt = (
+            f"Write a concise 2-3 sentence company overview for {ticker}. Cover the core business "
+            f"and key competitive position. "
+            f"Key facts: Market cap {mc_str}, P/E ratio {pe_str}, net margin {margin_str}. "
+            f"Write in third person, professional tone. Do not use bullet points or headers."
+        )
+    else:
+        prompt = (
+            f"Write a comprehensive 6-8 sentence company overview for {ticker} suitable for "
+            f"an institutional equity research report. Cover:\n"
+            f"1. Core business description and key products/services\n"
+            f"2. Total addressable market (TAM) and industry positioning\n"
+            f"3. Competitive advantages and moats (brand, ecosystem, IP, scale)\n"
+            f"4. Key growth drivers and strategic initiatives\n"
+            f"Key facts: Market cap {mc_str}, P/E ratio {pe_str}, net margin {margin_str}. "
+            f"Write in third person, professional tone. Do not use bullet points or headers."
+        )
 
     description = _cortex_complete(session, prompt)
     if not description:
@@ -855,12 +996,18 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
     # Competitive landscape via Cortex
     peers = resolve_peers(ticker)
     peer_str = ", ".join(peers[:4]) if peers else "major industry peers"
-    comp_prompt = (
-        f"Write a concise 3-4 sentence competitive landscape analysis for {ticker} "
-        f"in the context of its primary competitors ({peer_str}). Cover relative market "
-        f"position, key differentiators, and competitive threats. "
-        f"Write in professional third-person tone."
-    )
+    if detail_level == "summary":
+        comp_prompt = (
+            f"Write a 1-2 sentence competitive positioning statement for {ticker} "
+            f"relative to {peer_str}. Write in professional third-person tone."
+        )
+    else:
+        comp_prompt = (
+            f"Write a concise 3-4 sentence competitive landscape analysis for {ticker} "
+            f"in the context of its primary competitors ({peer_str}). Cover relative market "
+            f"position, key differentiators, and competitive threats. "
+            f"Write in professional third-person tone."
+        )
     competitive_landscape = _cortex_complete(session, comp_prompt)
     if competitive_landscape:
         competitive_landscape = _validate_with_guardrails(
@@ -910,7 +1057,8 @@ def generate_company_overview(session: Session, ticker: str) -> dict:
 # Peer Comparison (called by orchestrator)
 # ──────────────────────────────────────────────────────────────
 
-def generate_peer_comparison(session: Session, ticker: str) -> dict:
+def generate_peer_comparison(session: Session, ticker: str,
+                             detail_level: str = "detailed") -> dict:
     """
     Generate a Peer Comparison section for the PDF report.
 
@@ -1041,14 +1189,23 @@ def generate_peer_comparison(session: Session, ticker: str) -> dict:
                 f"{p['ticker']}: Market Cap {mc}, P/E {pe}, Net Margin {m_str}, EPS {eps}"
             )
 
-        prompt = (
-            f"You are a senior equity research analyst writing a peer comparison section. "
-            f"Compare {safe_ticker} against its peer group and write a concise 3-4 sentence "
-            f"comparative analysis. Highlight relative strengths and weaknesses in valuation, "
-            f"profitability, and scale. Be specific with numbers.\n\n"
-            f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
-            f"Write in third person, professional tone. Do not use bullet points."
-        )
+        if detail_level == "summary":
+            prompt = (
+                f"You are a senior equity research analyst. "
+                f"Compare {safe_ticker} against its peer group in 1-2 sentences. "
+                f"Highlight the most notable relative strength or weakness.\n\n"
+                f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
+                f"Write in third person, professional tone. Do not use bullet points."
+            )
+        else:
+            prompt = (
+                f"You are a senior equity research analyst writing a peer comparison section. "
+                f"Compare {safe_ticker} against its peer group and write a concise 3-4 sentence "
+                f"comparative analysis. Highlight relative strengths and weaknesses in valuation, "
+                f"profitability, and scale. Be specific with numbers.\n\n"
+                f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
+                f"Write in third person, professional tone. Do not use bullet points."
+            )
 
         summary = _cortex_complete(session, prompt)
         if not summary:
@@ -1300,7 +1457,8 @@ def generate_valuation_analysis(session: Session, ticker: str) -> dict:
 # ──────────────────────────────────────────────────────────────
 # Main entry point (called by orchestrator)
 # ──────────────────────────────────────────────────────────────
-def run_analysis(session: Session, charts: list, ticker: str) -> dict:
+def run_analysis(session: Session, charts: list, ticker: str,
+                 detail_level: str = "detailed") -> dict:
     """
     Full analysis pipeline:
         1. Generate written analysis for each validated chart (with CoA + KB enrichment)
@@ -1309,7 +1467,7 @@ def run_analysis(session: Session, charts: list, ticker: str) -> dict:
         4. All outputs validated by Guardrails
     """
     logger.info("=" * 50)
-    logger.info("Analysis Agent starting for %s", ticker)
+    logger.info("Analysis Agent starting for %s (detail_level=%s)", ticker, detail_level)
     logger.info("=" * 50)
 
     # Log which Bedrock integrations are active
@@ -1320,9 +1478,11 @@ def run_analysis(session: Session, charts: list, ticker: str) -> dict:
     if _get_multi_model():
         logger.info("  Multi-Model Consensus: ACTIVE")
 
-    chart_analyses = analyze_all_charts(session, charts, ticker)
+    chart_analyses = analyze_all_charts(session, charts, ticker,
+                                        detail_level=detail_level)
     sec_summaries = summarize_sec_filings(session, ticker)
-    investment_thesis = synthesize_analyses(session, chart_analyses, ticker)
+    investment_thesis = synthesize_analyses(session, chart_analyses, ticker,
+                                            detail_level=detail_level)
 
     result = {
         "chart_analyses": chart_analyses,

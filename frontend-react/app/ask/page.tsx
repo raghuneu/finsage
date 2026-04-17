@@ -98,7 +98,7 @@ export default function AskFinSagePage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
       {/* Source badge */}
       <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <AutoAwesomeIcon sx={{ color: '#C96BAE', fontSize: 18 }} />
+        <AutoAwesomeIcon sx={{ color: '#03B792', fontSize: 18 }} />
         <Typography variant="body2" sx={{ color: '#6B6760', fontSize: '0.8rem' }}>
           Powered by Snowflake Cortex
         </Typography>
@@ -123,9 +123,9 @@ export default function AskFinSagePage() {
                   cursor: 'pointer',
                   fontSize: '0.8rem',
                   '&:hover': {
-                    borderColor: '#C96BAE',
-                    color: '#C96BAE',
-                    backgroundColor: 'rgba(201,107,174,0.05)',
+                    borderColor: '#03B792',
+                    color: '#03B792',
+                    backgroundColor: 'rgba(3,183,146,0.05)',
                   },
                 }}
               />
@@ -233,9 +233,9 @@ export default function AskFinSagePage() {
             onClick={() => sendMessage(input)}
             disabled={loading || !input.trim()}
             sx={{
-              backgroundColor: input.trim() ? '#C96BAE' : 'transparent',
+              backgroundColor: input.trim() ? '#03B792' : 'transparent',
               color: input.trim() ? '#FFFFFF' : '#9A9590',
-              '&:hover': { backgroundColor: '#D98DC3' },
+              '&:hover': { backgroundColor: '#36CCAB' },
               '&.Mui-disabled': { backgroundColor: 'transparent', color: '#D8D4CB' },
             }}
           >

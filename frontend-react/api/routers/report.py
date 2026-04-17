@@ -30,6 +30,7 @@ class CAVMRequest(BaseModel):
     skip_charts: bool = False
     charts_dir: Optional[str] = None
     auto_load: bool = True  # automatically load missing data before pipeline
+    detail_level: str = "detailed"  # "detailed" or "summary"
 
 
 @router.post("/quick")
@@ -87,6 +88,7 @@ def start_cavm_pipeline(req: CAVMRequest, session=Depends(get_snowpark_session))
                 debug=req.debug,
                 skip_charts=req.skip_charts,
                 charts_dir=req.charts_dir,
+                detail_level=req.detail_level,
             )
             _tasks[task_id]["status"] = "completed"
             _tasks[task_id]["stage"] = 4

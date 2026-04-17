@@ -194,7 +194,7 @@ export default function DashboardPage() {
                     px: 2.5,
                     transition: 'background-color 0.2s ease',
                     '&:hover': {
-                      backgroundColor: 'rgba(201, 107, 174, 0.04)',
+                      backgroundColor: 'rgba(3, 183, 146, 0.04)',
                     },
                   }}
                 >
@@ -202,7 +202,7 @@ export default function DashboardPage() {
                     sx={{
                       width: 3,
                       alignSelf: 'stretch',
-                      backgroundColor: '#C96BAE',
+                      backgroundColor: '#03B792',
                       borderRadius: 1,
                       mr: 2,
                       flexShrink: 0,

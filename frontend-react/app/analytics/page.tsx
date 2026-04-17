@@ -61,7 +61,7 @@ const CHART_COLORS = {
   bullish: '#9DCBB8',
   bearish: '#E58B6D',
   warning: '#F8CB86',
-  accent: '#C96BAE',
+  accent: '#03B792',
   muted: '#6B6760',
   grid: '#E8E4DB40',
 };
@@ -276,7 +276,7 @@ function FundamentalsTab() {
               type="monotone"
               dataKey="EPS"
               stroke={CHART_COLORS.accent}
-              fill="rgba(201,107,174,0.08)"
+              fill="rgba(3,183,146,0.08)"
               strokeWidth={2}
             />
           </AreaChart>
@@ -491,8 +491,8 @@ export default function AnalyticsPage() {
           scrollButtons="auto"
           sx={{
             '& .MuiTab-root': { minHeight: 48 },
-            '& .Mui-selected': { color: '#C96BAE' },
-            '& .MuiTabs-indicator': { backgroundColor: '#C96BAE' },
+            '& .Mui-selected': { color: '#03B792' },
+            '& .MuiTabs-indicator': { backgroundColor: '#03B792' },
           }}
         >
           <Tab label="Stock Metrics" />

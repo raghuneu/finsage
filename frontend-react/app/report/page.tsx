@@ -41,7 +41,7 @@ const CAVM_STAGES = ['Chart Agent', 'Validation', 'Analysis', 'Report'];
 
 export default function ReportPage() {
   const { ticker } = useTicker();
-  const [reportType, setReportType] = useState<'quick' | 'cavm'>('quick');
+  const [reportType, setReportType] = useState<'quick' | 'cavm-summary' | 'cavm'>('quick');
   const [loading, setLoading] = useState(false);
   const [quickResult, setQuickResult] = useState<string | null>(null);
   const [quickError, setQuickError] = useState<string | null>(null);
@@ -77,8 +77,9 @@ export default function ReportPage() {
   };
 
   const handleCAVMPipeline = () => {
+    const detailLevel = reportType === 'cavm-summary' ? 'summary' : 'detailed';
     setCavm({ taskId: null, stage: 0, status: 'starting', result: null, error: null });
-    startCAVMPipeline(ticker, debugMode, skipCharts)
+    startCAVMPipeline(ticker, debugMode, skipCharts, detailLevel)
       .then((data) => {
         if (data.task_id) {
           setCavm((prev) => ({ ...prev, taskId: data.task_id, status: 'running' }));
@@ -122,7 +123,7 @@ export default function ReportPage() {
   return (
     <Box>
       {/* Report Section Pills */}
-      <Card sx={{ mb: 3, borderLeft: '3px solid #C96BAE' }}>
+      <Card sx={{ mb: 3, borderLeft: '3px solid #03B792' }}>
         <CardContent>
           <Typography
             variant="h6"
@@ -137,9 +138,9 @@ export default function ReportPage() {
                 label={`${i + 1}. ${s}`}
                 size="small"
                 sx={{
-                  backgroundColor: 'rgba(201,107,174,0.08)',
-                  color: '#C96BAE',
-                  border: '1px solid rgba(201,107,174,0.18)',
+                  backgroundColor: 'rgba(3,183,146,0.08)',
+                  color: '#03B792',
+                  border: '1px solid rgba(3,183,146,0.18)',
                   fontSize: '0.75rem',
                 }}
               />
@@ -150,12 +151,12 @@ export default function ReportPage() {
 
       {/* Report Type Selector */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Card
             onClick={() => setReportType('quick')}
             sx={{
               cursor: 'pointer',
-              borderColor: reportType === 'quick' ? '#C96BAE' : '#E8E4DB',
+              borderColor: reportType === 'quick' ? '#03B792' : '#E8E4DB',
               transition: 'border-color 0.25s ease',
               height: '100%',
             }}
@@ -166,7 +167,7 @@ export default function ReportPage() {
                 sx={{
                   fontFamily: '"DM Serif Display", Georgia, serif',
                   fontWeight: 400,
-                  color: reportType === 'quick' ? '#C96BAE' : '#2C2A25',
+                  color: reportType === 'quick' ? '#03B792' : '#2C2A25',
                 }}
               >
                 Quick Report
@@ -178,12 +179,12 @@ export default function ReportPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Card
-            onClick={() => setReportType('cavm')}
+            onClick={() => setReportType('cavm-summary')}
             sx={{
               cursor: 'pointer',
-              borderColor: reportType === 'cavm' ? '#C96BAE' : '#E8E4DB',
+              borderColor: reportType === 'cavm-summary' ? '#03B792' : '#E8E4DB',
               transition: 'border-color 0.25s ease',
               height: '100%',
             }}
@@ -194,7 +195,35 @@ export default function ReportPage() {
                 sx={{
                   fontFamily: '"DM Serif Display", Georgia, serif',
                   fontWeight: 400,
-                  color: reportType === 'cavm' ? '#C96BAE' : '#2C2A25',
+                  color: reportType === 'cavm-summary' ? '#03B792' : '#2C2A25',
+                }}
+              >
+                Summary PDF Report
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#6B6760', mt: 1 }}>
+                CAVM pipeline with charts and condensed analysis. Produces an 8-10 page branded PDF
+                with key insights only. Typically takes 3-8 minutes.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card
+            onClick={() => setReportType('cavm')}
+            sx={{
+              cursor: 'pointer',
+              borderColor: reportType === 'cavm' ? '#03B792' : '#E8E4DB',
+              transition: 'border-color 0.25s ease',
+              height: '100%',
+            }}
+          >
+            <CardContent>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontFamily: '"DM Serif Display", Georgia, serif',
+                  fontWeight: 400,
+                  color: reportType === 'cavm' ? '#03B792' : '#2C2A25',
                 }}
               >
                 Full CAVM Pipeline
@@ -247,7 +276,7 @@ export default function ReportPage() {
       )}
 
       {/* CAVM Pipeline */}
-      {reportType === 'cavm' && (
+      {(reportType === 'cavm' || reportType === 'cavm-summary') && (
         <Box>
           {/* Pipeline stepper */}
           <Card sx={{ mb: 3, p: 2 }}>
@@ -282,7 +311,7 @@ export default function ReportPage() {
                   checked={debugMode}
                   onChange={(e) => setDebugMode(e.target.checked)}
                   size="small"
-                  sx={{ color: '#6B6760', '&.Mui-checked': { color: '#C96BAE' } }}
+                  sx={{ color: '#6B6760', '&.Mui-checked': { color: '#03B792' } }}
                 />
               }
               label={<Typography variant="body2" sx={{ color: '#6B6760' }}>Debug mode</Typography>}
@@ -293,7 +322,7 @@ export default function ReportPage() {
                   checked={skipCharts}
                   onChange={(e) => setSkipCharts(e.target.checked)}
                   size="small"
-                  sx={{ color: '#6B6760', '&.Mui-checked': { color: '#C96BAE' } }}
+                  sx={{ color: '#6B6760', '&.Mui-checked': { color: '#03B792' } }}
                 />
               }
               label={<Typography variant="body2" sx={{ color: '#6B6760' }}>Skip chart generation</Typography>}
@@ -313,7 +342,11 @@ export default function ReportPage() {
             }
             sx={{ mb: 2 }}
           >
-            {cavm.status === 'running' ? 'Pipeline Running...' : 'Generate Full PDF Report'}
+            {cavm.status === 'running'
+              ? 'Pipeline Running...'
+              : reportType === 'cavm-summary'
+              ? 'Generate Summary PDF Report'
+              : 'Generate Full PDF Report'}
           </Button>
 
           {cavm.error && <Alert severity="error" sx={{ mb: 2 }}>{cavm.error}</Alert>}

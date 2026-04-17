@@ -48,7 +48,7 @@ const COLORS = {
   degraded: '#E5A030',
   down: '#C9392C',
   primary: '#0382B7',
-  accent: '#C96BAE',
+  accent: '#03B792',
   muted: '#6B6760',
   grid: '#E8E4DB40',
   success: '#9DCBB8',
@@ -308,7 +308,7 @@ function QualityTab() {
   }, {});
   const lineData = Object.values(chartData).sort((a, b) => (a.date as string).localeCompare(b.date as string));
 
-  const tableColors = ['#0382B7', '#C96BAE', '#1A9E60', '#E5A030', '#E58B6D'];
+  const tableColors = ['#0382B7', '#03B792', '#1A9E60', '#E5A030', '#E58B6D'];
 
   return (
     <Box>
@@ -486,7 +486,7 @@ function QueryTab() {
 
   if (loading) return <ChartSkeleton />;
 
-  const barColors = ['#0382B7', '#C96BAE', '#1A9E60', '#E5A030', '#E58B6D', '#6B6760'];
+  const barColors = ['#0382B7', '#03B792', '#1A9E60', '#E5A030', '#E58B6D', '#6B6760'];
 
   return (
     <Box>
@@ -556,8 +556,8 @@ export default function ObservabilityPage() {
           scrollButtons="auto"
           sx={{
             '& .MuiTab-root': { minHeight: 48 },
-            '& .Mui-selected': { color: '#C96BAE' },
-            '& .MuiTabs-indicator': { backgroundColor: '#C96BAE' },
+            '& .Mui-selected': { color: '#03B792' },
+            '& .MuiTabs-indicator': { backgroundColor: '#03B792' },
           }}
         >
           <Tab label="Health" />

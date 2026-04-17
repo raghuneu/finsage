@@ -10,7 +10,7 @@ interface SectionHeaderProps {
 
 export default function SectionHeader({ title, subtitle }: SectionHeaderProps) {
   return (
-    <Box sx={{ borderLeft: '3px solid #C96BAE', pl: 2, mb: 2 }}>
+    <Box sx={{ borderLeft: '3px solid #03B792', pl: 2, mb: 2 }}>
       <Typography
         variant="h6"
         sx={{

@@ -5,7 +5,7 @@ import { createTheme } from '@mui/material/styles';
 // ── Fancy Flirt Palette ──────────────────────────────────────
 // Cerulean (RGB)     #0382B7  — Primary / Interactive
 // Rare Jade          #9DCBB8  — Success / Bullish
-// Super Pink         #C96BAE  — Accent / Active nav
+// Jade Accent        #03B792  — Accent / Active nav
 // Trendy Coral       #E58B6D  — Warning / Bearish
 // Sky Yellow         #F8CB86  — Highlight / Charts
 // Cookies And Cream  #EBE1B2  — Warm neutral accent
@@ -23,9 +23,9 @@ const theme = createTheme({
       dark: '#026A95',
     },
     secondary: {
-      main: '#C96BAE',
-      light: '#D98DC3',
-      dark: '#A7528E',
+      main: '#03B792',
+      light: '#36CCAB',
+      dark: '#029574',
     },
     success: {
       main: '#9DCBB8',
@@ -162,12 +162,12 @@ const theme = createTheme({
         {
           props: { variant: 'contained', color: 'primary' },
           style: {
-            background: 'linear-gradient(135deg, #C96BAE 0%, #0382B7 100%)',
+            background: 'linear-gradient(135deg, #03B792 0%, #0382B7 100%)',
             color: '#FFFFFF',
-            boxShadow: '0 2px 12px rgba(201,107,174,0.2)',
+            boxShadow: '0 2px 12px rgba(3,183,146,0.2)',
             '&:hover': {
-              background: 'linear-gradient(135deg, #D98DC3 0%, #2A9DD0 100%)',
-              boxShadow: '0 4px 20px rgba(201,107,174,0.3)',
+              background: 'linear-gradient(135deg, #36CCAB 0%, #2A9DD0 100%)',
+              boxShadow: '0 4px 20px rgba(3,183,146,0.3)',
             },
           },
         },
@@ -184,7 +184,7 @@ const theme = createTheme({
               borderColor: '#D8D4CB',
             },
             '&.Mui-focused fieldset': {
-              borderColor: '#C96BAE',
+              borderColor: '#03B792',
             },
           },
         },

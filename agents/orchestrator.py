@@ -147,7 +147,8 @@ def stage_validation(session, charts: list) -> list:
     return validated
 
 
-def stage_analysis(session, charts: list, ticker: str) -> dict:
+def stage_analysis(session, charts: list, ticker: str,
+                   detail_level: str = "detailed") -> dict:
     """Stage 3 — Generate analysis via analysis_agent.
 
     Stage 3a (run_analysis) is serial due to Chain-of-Analysis cross-references.
@@ -157,7 +158,7 @@ def stage_analysis(session, charts: list, ticker: str) -> dict:
     logger.info("━" * 50)
     logger.info("STAGE 3a: LLM Analysis (Chain-of-Analysis — serial)")
     logger.info("━" * 50)
-    analysis = run_analysis(session, charts, ticker)
+    analysis = run_analysis(session, charts, ticker, detail_level=detail_level)
     logger.info("Stage 3a complete: %d chart analyses + SEC summaries",
                 len(analysis.get("chart_analyses", [])))
 
@@ -190,10 +191,10 @@ def stage_analysis(session, charts: list, ticker: str) -> dict:
         },
     }
 
-    def _run_task(name, fn, tick):
+    def _run_task(name, fn, tick, **kwargs):
         worker_session = get_session()
         try:
-            result = fn(worker_session, tick)
+            result = fn(worker_session, tick, **kwargs)
             logger.info("%s generated for %s", name, tick)
             return name, result
         except Exception as e:
@@ -206,16 +207,22 @@ def stage_analysis(session, charts: list, ticker: str) -> dict:
                 pass
 
     tasks = [
-        ("company_overview",    generate_company_overview),
-        ("peer_comparison",     generate_peer_comparison),
-        ("financial_deep_dive", generate_financial_deep_dive),
-        ("valuation",           generate_valuation_analysis),
+        ("company_overview",    generate_company_overview, {"detail_level": detail_level}),
+        ("peer_comparison",     generate_peer_comparison,  {"detail_level": detail_level}),
     ]
+
+    # Skip deep dive and valuation in summary mode — they are not rendered in
+    # the summary PDF and each requires multiple LLM calls.
+    if detail_level != "summary":
+        tasks += [
+            ("financial_deep_dive", generate_financial_deep_dive, {}),
+            ("valuation",           generate_valuation_analysis,  {}),
+        ]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            executor.submit(_run_task, name, fn, ticker): name
-            for name, fn in tasks
+            executor.submit(_run_task, name, fn, ticker, **kwargs): name
+            for name, fn, kwargs in tasks
         }
 
         for future in concurrent.futures.as_completed(futures):
@@ -231,7 +238,7 @@ def stage_analysis(session, charts: list, ticker: str) -> dict:
 
 
 def stage_report(ticker: str, charts: list, analysis: dict,
-                 output_dir: str) -> str:
+                 output_dir: str, detail_level: str = "detailed") -> str:
     """Stage 4 — Build PDF via report_agent."""
     logger.info("━" * 50)
     logger.info("STAGE 4: PDF Report Generation")
@@ -243,6 +250,7 @@ def stage_report(ticker: str, charts: list, analysis: dict,
         analysis=analysis,
         output_dir=output_dir,
         company_name=company_name,
+        detail_level=detail_level,
     )
     logger.info("Stage 4 complete: %s", pdf_path)
     return pdf_path
@@ -337,6 +345,7 @@ def generate_report_pipeline(
     debug: bool = False,
     skip_charts: bool = False,
     charts_dir: str = None,
+    detail_level: str = "detailed",
 ) -> dict:
     """
     Full FinSage CAVM pipeline for a single ticker.
@@ -347,6 +356,8 @@ def generate_report_pipeline(
         skip_charts:  If True, loads charts from a previous run instead of
                       regenerating (saves ~10 minutes during development)
         charts_dir:   Path to previous chart output dir (used with skip_charts)
+        detail_level: "detailed" for full 15-20 page report,
+                      "summary" for condensed 8-10 page report
 
     Returns:
         Dict with pdf_path, elapsed_seconds, and stage summaries
@@ -468,13 +479,15 @@ def generate_report_pipeline(
 
         # ── Stage 3: Analysis (only passing charts) ──────────
         tracker.start_stage("analysis")
-        analysis = stage_analysis(session, passing_charts, ticker)
+        analysis = stage_analysis(session, passing_charts, ticker,
+                                  detail_level=detail_level)
         tracker.end_stage("analysis", status="SUCCESS",
                           rows_affected=len(analysis.get("chart_analyses", [])))
 
         # ── Stage 4: Report (only passing charts) ────────────
         tracker.start_stage("report_generation")
-        pdf_path = stage_report(ticker, passing_charts, analysis, run_dir)
+        pdf_path = stage_report(ticker, passing_charts, analysis, run_dir,
+                                detail_level=detail_level)
         tracker.end_stage("report_generation", status="SUCCESS")
 
     except Exception as e:
@@ -554,6 +567,11 @@ Examples:
         "--charts-dir", type=str, default=None,
         help="Specific chart output folder to use with --skip-charts"
     )
+    parser.add_argument(
+        "--detail-level", type=str, default="detailed",
+        choices=["detailed", "summary"],
+        help="Report detail level: 'detailed' (full 15-20 pages) or 'summary' (condensed 8-10 pages)"
+    )
     args = parser.parse_args()
 
     generate_report_pipeline(
@@ -561,4 +579,5 @@ Examples:
         debug=args.debug,
         skip_charts=args.skip_charts,
         charts_dir=args.charts_dir,
+        detail_level=args.detail_level,
     )
