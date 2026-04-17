@@ -262,8 +262,8 @@ export default function ReportPage() {
                     onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveFolderName(summaryReports[0].folder_name); }}
                     sx={{
                       fontSize: '0.7rem', py: 0.25, px: 1,
-                      borderColor: 'rgba(3,183,146,0.3)', color: '#03B792',
-                      '&:hover': { borderColor: '#03B792', backgroundColor: 'rgba(3,183,146,0.08)' },
+                      borderColor: 'rgba(3,130,183,0.3)', color: '#0382B7',
+                      '&:hover': { borderColor: '#0382B7', backgroundColor: 'rgba(3,130,183,0.08)' },
                     }}
                   >
                     View Previous Report
@@ -319,8 +319,8 @@ export default function ReportPage() {
                     onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveFolderName(fullReports[0].folder_name); }}
                     sx={{
                       fontSize: '0.7rem', py: 0.25, px: 1,
-                      borderColor: 'rgba(3,183,146,0.3)', color: '#03B792',
-                      '&:hover': { borderColor: '#03B792', backgroundColor: 'rgba(3,183,146,0.08)' },
+                      borderColor: 'rgba(3,130,183,0.3)', color: '#0382B7',
+                      '&:hover': { borderColor: '#0382B7', backgroundColor: 'rgba(3,130,183,0.08)' },
                     }}
                   >
                     View Previous Report
@@ -386,8 +386,12 @@ export default function ReportPage() {
                       borderTopStyle: 'dashed',
                       borderTopWidth: 3,
                     },
-                    '&.Mui-active .MuiStepConnector-line, &.Mui-completed .MuiStepConnector-line': {
+                    '&.Mui-active .MuiStepConnector-line': {
                       borderColor: '#03B792',
+                      borderTopStyle: 'solid',
+                    },
+                    '&.Mui-completed .MuiStepConnector-line': {
+                      borderColor: '#0382B7',
                       borderTopStyle: 'solid',
                     },
                   }}
@@ -401,7 +405,7 @@ export default function ReportPage() {
                       '& .MuiStepLabel-label': {
                         color:
                           cavmForTicker && i < cavm.stage
-                            ? '#03B792'
+                            ? '#0382B7'
                             : cavmForTicker && i === cavm.stage && cavm.status === 'running'
                             ? '#03B792'
                             : '#7A756F',
@@ -411,7 +415,7 @@ export default function ReportPage() {
                       '& .MuiStepIcon-root': {
                         color: '#C4BFB5',
                         '&.Mui-active': { color: '#03B792' },
-                        '&.Mui-completed': { color: '#03B792' },
+                        '&.Mui-completed': { color: '#0382B7' },
                       },
                     }}
                   >
@@ -564,10 +568,10 @@ export default function ReportPage() {
               </Alert>
               <Grid container spacing={2} sx={{ mb: 2 }}>
                 <Grid size={{ xs: 4 }}>
-                  <MetricCard title="Charts Generated" value={String((cavm.result as Record<string, unknown>).charts_count || 0)} />
+                  <MetricCard title="Charts Generated" value={String((cavm.result as Record<string, unknown>).charts_count || 0)} color="#0382B7" />
                 </Grid>
                 <Grid size={{ xs: 4 }}>
-                  <MetricCard title="Charts Validated" value={String((cavm.result as Record<string, unknown>).charts_validated || 0)} />
+                  <MetricCard title="Charts Validated" value={String((cavm.result as Record<string, unknown>).charts_validated || 0)} color="#0382B7" />
                 </Grid>
                 <Grid size={{ xs: 4 }}>
                   <MetricCard
@@ -578,6 +582,7 @@ export default function ReportPage() {
                       const s = Math.round(totalSec % 60);
                       return m > 0 ? `${m}m ${s}s` : `${s}s`;
                     })()}
+                    color="#0382B7"
                   />
                 </Grid>
               </Grid>

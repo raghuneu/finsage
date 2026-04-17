@@ -126,7 +126,7 @@ export default function ReportChat({ ticker, folderName }: ReportChatProps) {
         {/* Header: icon + title + ticker chip + clear button */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <SmartToyIcon sx={{ color: '#03B792', fontSize: 22 }} />
+            <SmartToyIcon sx={{ color: '#0382B7', fontSize: 22 }} />
             <Typography
               variant="h6"
               sx={{ fontFamily: '"DM Serif Display", Georgia, serif', fontWeight: 400 }}
@@ -137,8 +137,8 @@ export default function ReportChat({ ticker, folderName }: ReportChatProps) {
               label={ticker}
               size="small"
               sx={{
-                backgroundColor: 'rgba(3,183,146,0.08)',
-                color: '#03B792',
+                backgroundColor: 'rgba(3,130,183,0.08)',
+                color: '#0382B7',
                 fontWeight: 600,
                 fontSize: '0.7rem',
               }}
@@ -198,10 +198,10 @@ export default function ReportChat({ ticker, folderName }: ReportChatProps) {
                 onClick={() => sendMessage(prompt)}
                 sx={{
                   cursor: 'pointer',
-                  backgroundColor: 'rgba(3,183,146,0.06)',
-                  color: '#03B792',
-                  border: '1px solid rgba(3,183,146,0.15)',
-                  '&:hover': { backgroundColor: 'rgba(3,183,146,0.12)' },
+                  backgroundColor: 'rgba(3,130,183,0.06)',
+                  color: '#0382B7',
+                  border: '1px solid rgba(3,130,183,0.15)',
+                  '&:hover': { backgroundColor: 'rgba(3,130,183,0.12)' },
                 }}
               />
             ))}
