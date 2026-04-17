@@ -1685,7 +1685,9 @@ def build_pdf(
     )
     content_frame = Frame(
         MARGIN, 14 * mm,
-        PAGE_W - 2 * MARGIN, PAGE_H - 28 * mm,
+        PAGE_W - 2 * MARGIN, PAGE_H - 32 * mm,
+        topPadding=4 * mm,
+        bottomPadding=2 * mm,
         id="content"
     )
 
@@ -1701,10 +1703,11 @@ def build_pdf(
 
     # Page 1: Cover (with Buy/Hold/Sell rating)
     elements.append(NextPageTemplate("Cover"))
-    elements += build_cover(ticker, company_name, styles, sig, charts=charts)
-
-    # Switch to content template
-    elements.append(NextPageTemplate("Content"))
+    cover_elems = build_cover(ticker, company_name, styles, sig, charts=charts)
+    # Insert template switch BEFORE the PageBreak that ends the cover,
+    # so the TOC page uses the Content template (not Cover).
+    cover_elems.insert(-1, NextPageTemplate("Content"))
+    elements += cover_elems
 
     # Page 2: Table of Contents
     elements += build_toc(charts, styles)
