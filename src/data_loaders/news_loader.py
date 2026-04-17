@@ -56,8 +56,8 @@ class NewsLoader(BaseDataLoader):
             'RAW.RAW_NEWS', ticker, 'PUBLISHED_AT'
         )
 
-        # Build query
-        query = f"{ticker} stock"
+        # Build query — quote the ticker for exact match
+        query = f'"{ticker}" stock'
         url = f"https://newsapi.org/v2/everything?q={query}&apiKey={self.api_key}&language=en&pageSize=10&sortBy=publishedAt"
 
         if last_date:
@@ -73,9 +73,15 @@ class NewsLoader(BaseDataLoader):
         response.raise_for_status()
         data = response.json()
 
-        # Parse articles (your exact structure)
+        # Parse articles and filter for relevance
+        ticker_lower = ticker.lower()
         articles = []
         for article in data.get('articles', []):
+            title = article.get('title') or ''
+            description = article.get('description') or ''
+            text = f"{title} {description}".lower()
+            if ticker_lower not in text:
+                continue
             articles.append({
                 'article_id': str(uuid.uuid4()),
                 'title': article.get('title'),

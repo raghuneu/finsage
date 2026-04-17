@@ -1,9 +1,11 @@
 """Base class for all data loaders - preserves your patterns"""
 
+import time
 from abc import ABC, abstractmethod
 import pandas as pd
 from typing import Optional
 from src.utils.logger import setup_logger
+from src.utils.observability import RunContext, PipelineTracker
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests
 import httpx
@@ -49,19 +51,36 @@ class BaseDataLoader(ABC):
 
     def load(self, ticker: str, **kwargs) -> bool:
         """
-        Main execution method - mirrors your script logic
+        Main execution method - mirrors your script logic.
+        Records each run to FCT_PIPELINE_RUNS for observability.
 
         Returns:
             True if successful, False otherwise
         """
-        self.logger.info(f"🔄 Processing {ticker}...")
+        self.logger.info(f"Processing {ticker}...")
+        stage_name = self.__class__.__name__
 
+        # Set up observability tracker (best-effort — never blocks loading)
+        tracker = None
+        try:
+            session = self.sf_client.session
+            ctx = RunContext(pipeline_type="DATA_LOAD", ticker=ticker)
+            tracker = PipelineTracker(session, ctx)
+            tracker.start_stage(stage_name)
+        except Exception:
+            pass
+
+        t0 = time.time()
         try:
             # 1. Fetch data
             df = self.fetch_data(ticker, **kwargs)
 
             if df.empty:
-                self.logger.warning(f"⚠️  No data returned for {ticker}")
+                self.logger.warning(f"No data returned for {ticker}")
+                if tracker:
+                    tracker.end_stage(stage_name, status="SUCCESS",
+                                      rows_affected=0,
+                                      metadata={"reason": "empty_response"})
                 return False
 
             # 2. Transform
@@ -78,11 +97,21 @@ class BaseDataLoader(ABC):
             # 5. Load to Snowflake using your MERGE pattern
             self._load_to_snowflake(df)
 
-            self.logger.info(f"✅ {ticker} completed - {len(df)} rows, quality: {score:.1f}")
+            elapsed = round(time.time() - t0, 2)
+            self.logger.info(
+                f"{ticker} completed - {len(df)} rows, quality: {score:.1f}, {elapsed}s"
+            )
+            if tracker:
+                tracker.end_stage(stage_name, status="SUCCESS",
+                                  rows_affected=len(df),
+                                  metadata={"quality_score": score})
             return True
 
         except Exception as e:
-            self.logger.error(f"❌ {ticker} failed: {e}")
+            self.logger.error(f"{ticker} failed: {e}")
+            if tracker:
+                tracker.end_stage(stage_name, status="FAILED",
+                                  error_message=str(e)[:500])
             return False
 
     def _load_to_snowflake(self, df: pd.DataFrame):
