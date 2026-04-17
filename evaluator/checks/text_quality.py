@@ -213,13 +213,13 @@ def check_text_quality(
     Returns:
         (score 0-100, list of issue strings)
     """
-    pipeline = artifacts.get("pipeline_result") or {}
+    analysis = artifacts.get("analysis_result") or {}
     manifest = artifacts.get("chart_manifest") or []
 
     charts_by_id = {c.get("chart_id"): c for c in manifest}
     chart_analyses = {
         a.get("chart_id"): a.get("analysis_text", "")
-        for a in (pipeline.get("analysis", {}).get("chart_analyses") or [])
+        for a in (analysis.get("chart_analyses") or [])
     }
 
     all_issues: list[str] = []
@@ -251,7 +251,7 @@ def check_text_quality(
 
     # ── Score section-level text fields ───────────────────────────────────
     for dot_path in REQUIRED_TEXT_FIELDS:
-        text = _get_nested(pipeline, dot_path) or ""
+        text = _get_nested(analysis, dot_path) or ""
         r_score, r_issues = _rule_score_text(text, dot_path)
         rule_scores.append(r_score)
         all_issues.extend(r_issues)

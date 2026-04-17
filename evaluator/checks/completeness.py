@@ -47,13 +47,15 @@ def check_completeness(artifacts: dict) -> tuple[float, list[str]]:
     total_checks = 0
     passed_checks = 0
 
-    pipeline = artifacts.get("pipeline_result") or {}
-    manifest = artifacts.get("chart_manifest") or []
+    pipeline  = artifacts.get("pipeline_result") or {}
+    analysis  = artifacts.get("analysis_result") or {}
+    manifest  = artifacts.get("chart_manifest") or []
     output_dir = Path(artifacts.get("output_dir", "."))
 
     # ── 1. Core JSON files loaded ──────────────────────────────────────────
-    for key, label in (("pipeline_result", "pipeline_result.json"),
-                       ("chart_manifest",  "chart_manifest.json")):
+    for key, label in (("pipeline_result",  "pipeline_result.json"),
+                       ("chart_manifest",   "chart_manifest.json"),
+                       ("analysis_result",  "analysis_result.json")):
         total_checks += 1
         if artifacts.get(key) is not None:
             passed_checks += 1
@@ -98,7 +100,7 @@ def check_completeness(artifacts: dict) -> tuple[float, list[str]]:
     # ── 5. Per-chart analysis texts ────────────────────────────────────────
     chart_analyses = {
         a.get("chart_id"): a.get("analysis_text", "")
-        for a in (pipeline.get("analysis", {}).get("chart_analyses") or [])
+        for a in (analysis.get("chart_analyses") or [])
     }
     for chart_id in REQUIRED_CHART_IDS:
         total_checks += 1
@@ -114,10 +116,10 @@ def check_completeness(artifacts: dict) -> tuple[float, list[str]]:
         else:
             passed_checks += 1
 
-    # ── 6. Section-level text fields ─────────────────────────────────────
+    # ── 6. Section-level text fields (read from analysis_result) ─────────
     for dot_path, min_words in REQUIRED_TEXT_FIELDS.items():
         total_checks += 1
-        text = _get_nested(pipeline, dot_path) or ""
+        text = _get_nested(analysis, dot_path) or ""
         if not text:
             issues.append(f"Text field empty: {dot_path}")
         elif _is_fallback(text):

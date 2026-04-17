@@ -24,6 +24,10 @@ import os
 import sys
 from pathlib import Path
 
+# Ensure Unicode output works on Windows terminals
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf-8-sig"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Allow running as  python evaluator/cli.py  from project root
 _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -139,6 +143,47 @@ def _find_latest_output(outputs_dir: Path) -> Path:
     return candidates[0]
 
 
+def _run_pdf_only(pdf_path: str) -> int:
+    """Run just the PDF content check against a standalone PDF file."""
+    from evaluator.checks.pdf_content import check_pdf_content
+
+    p = Path(pdf_path)
+    if not p.exists():
+        print(f"Error: PDF not found: {pdf_path}", file=sys.stderr)
+        return 1
+
+    # Infer ticker from filename (e.g. MSFT_FinSage_Report_... → MSFT)
+    ticker = p.stem.split("_")[0].upper()
+
+    artifacts = {
+        "pipeline_result": {"ticker": ticker, "pdf_path": str(p)},
+        "chart_manifest": [],  # no manifest available — skips figure cross-validation
+    }
+
+    score, issues = check_pdf_content(artifacts)
+
+    print()
+    print(f"{_BOLD}{'=' * 62}{_RESET}")
+    print(f"{_BOLD}  FinSage PDF Content Check (standalone){_RESET}")
+    print(f"  Ticker inferred: {ticker}")
+    print(f"  File: {p.name}")
+    print(f"{'-' * 62}")
+    print(f"  {_BOLD}PDF Score:{_RESET}  {_colour_score(score)} / 100   {_bar(score)}")
+    print(f"{'-' * 62}")
+    if issues:
+        print(f"  {_BOLD}Issues ({len(issues)}):{_RESET}")
+        for issue in issues:
+            print(f"    - {issue}")
+    else:
+        print(f"  {_GREEN}No issues found.{_RESET}")
+    print(f"{'=' * 62}")
+    print()
+    print("  Note: full evaluation (data quality, text quality, consistency)")
+    print("  requires the pipeline output directory with JSON sidecar files.")
+    print()
+    return 0 if score >= 75 else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Evaluate a FinSage report output directory for publication readiness.",
@@ -168,6 +213,13 @@ def main() -> int:
         help="Custom path for the eval_report_card.json output (default: <output_dir>/eval_report_card.json)",
     )
     parser.add_argument(
+        "--pdf-only",
+        metavar="PDF_PATH",
+        default=None,
+        help="Run only the PDF content check against a standalone PDF file "
+             "(no pipeline JSON files required)",
+    )
+    parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -179,6 +231,10 @@ def main() -> int:
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    # ── PDF-only mode ─────────────────────────────────────────────────────
+    if args.pdf_only:
+        return _run_pdf_only(args.pdf_only)
 
     # Resolve output directory
     if args.latest:

@@ -299,7 +299,9 @@ def find_latest_charts_dir(ticker: str) -> str:
 def save_pipeline_result(ticker: str, charts: list, analysis: dict,
                           pdf_path: str, output_dir: str,
                           elapsed_seconds: float):
-    """Save a pipeline run summary JSON for audit trail."""
+    """Save pipeline run summary (pipeline_result.json) and full analysis text
+    (analysis_result.json) for the evaluation system."""
+
     result = {
         "ticker": ticker,
         "run_at": datetime.now().isoformat(),
@@ -323,9 +325,26 @@ def save_pipeline_result(ticker: str, charts: list, analysis: dict,
     result_path = os.path.join(output_dir, "pipeline_result.json")
     with open(result_path, "w") as f:
         json.dump(result, f, indent=2)
-
     logger.info("Pipeline result saved: %s", result_path)
+
+    # Save full analysis text for evaluator (separate file — keeps pipeline_result lean)
+    _save_analysis_result(analysis, output_dir)
+
     return result
+
+
+def _save_analysis_result(analysis: dict, output_dir: str) -> None:
+    """Write analysis_result.json with all LLM-generated text for the evaluator."""
+    # Pull only serialisable / text-bearing keys
+    _text_keys = (
+        "chart_analyses", "mda_summary", "risk_summary", "investment_thesis",
+        "company_overview", "peer_comparison", "financial_deep_dive", "valuation",
+    )
+    payload = {k: analysis[k] for k in _text_keys if k in analysis}
+    path = os.path.join(output_dir, "analysis_result.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    logger.info("Analysis result saved: %s", path)
 
 
 # ──────────────────────────────────────────────────────────────

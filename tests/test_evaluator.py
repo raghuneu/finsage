@@ -14,6 +14,7 @@ from evaluator.checks.data_quality import check_data_quality
 from evaluator.checks.chart_quality import check_chart_quality
 from evaluator.checks.consistency import check_consistency, _signal_polarity, _text_polarity
 from evaluator.checks.text_quality import check_text_quality, _rule_score_text
+from evaluator.checks.pdf_content import check_pdf_content
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -80,7 +81,10 @@ def full_manifest(minimal_chart):
 
 @pytest.fixture
 def pipeline_result(tmp_path):
-    """Minimal valid pipeline_result.json content (no real PDF)."""
+    """Minimal valid pipeline_result.json content (no real PDF).
+    Matches the lean summary format written by save_pipeline_result() after
+    the observability refactor — full analysis text lives in analysis_result.json.
+    """
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(b"%" + b"PDF-1.4" + b"\x00" * 150_000)
 
@@ -159,31 +163,125 @@ def pipeline_result(tmp_path):
         ]
     ]
 
+    # Lean summary format — matches save_pipeline_result() post-observability refactor.
+    # Full analysis text lives in analysis_result.json (analysis_result fixture below).
     return {
         "ticker": "AAPL",
         "company_name": "Apple Inc.",
+        "run_id": "run_AAPL_20260417_120000_abcd1234",
         "pdf_path": str(pdf),
-        "analysis": {
-            "chart_analyses": chart_analyses,
-            "investment_thesis": (
-                "Apple Inc. demonstrates robust financial health, with revenue growth of 8.5% "
-                "year-over-year and exceptional profit margins of 25.3%. The company continues "
-                "to outperform sector peers on multiple fundamental metrics, supported by a "
-                "strong balance sheet and improving sentiment indicators. The technical picture "
-                "reinforces the constructive fundamental view, with price action sustaining above "
-                "all three key moving averages. Valuation remains reasonable relative to peers."
-            ),
-            "mda_summary": (
-                "Management discussion highlights sustained revenue momentum and expanding "
-                "operating margins driven by services segment growth. Capital allocation "
-                "priorities include share buybacks and dividend increases."
-            ),
-            "risk_summary": (
-                "Key risks include macroeconomic headwinds, supply chain concentration, "
-                "and regulatory scrutiny in major markets. Currency fluctuations may impact "
-                "international revenue contribution."
-            ),
+        "elapsed_seconds": 42.0,
+        "charts_summary": [
+            {"chart_id": cid, "validated": True, "refinement_count": 1}
+            for cid in [
+                "price_sma", "volatility", "revenue_growth", "eps_trend",
+                "financial_health", "margin_trend", "balance_sheet", "sentiment",
+            ]
+        ],
+        "analysis_summary": {
+            "chart_analyses_count": 8,
+            "mda_summary_length": 120,
+            "risk_summary_length": 110,
         },
+    }
+
+
+@pytest.fixture
+def analysis_result():
+    """analysis_result.json content — matches the structure written by
+    _save_analysis_result() in orchestrator.py (top-level text keys)."""
+    _chart_texts = {
+        "price_sma": (
+            "Apple trades at $185.00, with the 30-day SMA at $180.10 and the 90-day SMA "
+            "at $175.00 confirming a sustained uptrend. The 7-day SMA of $184.00 reflects "
+            "near-term positive momentum, and price action 5.7% above the 90-day average "
+            "indicates strong bullish conviction. The current trend signal is BULLISH across "
+            "all three key moving average horizons, supporting a constructive technical view."
+        ),
+        "volatility": (
+            "Apple exhibits a 30-day volatility of 2.5%, below the large-cap technology "
+            "sector median, indicating a relatively stable price environment. The average "
+            "daily range of 1.2% implies moderate intraday risk suitable for institutional "
+            "participation. Average daily volume of 50,000,000 shares confirms deep liquidity "
+            "and efficient price discovery. The low volatility profile positions Apple as a "
+            "lower-risk holding within a diversified technology portfolio."
+        ),
+        "revenue_growth": (
+            "Apple reported revenue growth of 8.5% year-over-year, reflecting sustained "
+            "top-line momentum across its product and services portfolio. Net income growth "
+            "of 12.3% outpaced revenue, indicating meaningful margin expansion. The "
+            "STRONG_GROWTH fundamental signal confirms accelerating earnings quality. "
+            "This pattern of net income growing faster than revenue is typically "
+            "associated with durable competitive advantages and pricing power."
+        ),
+        "eps_trend": (
+            "Earnings per share of $1.53 grew 15.2% year-over-year and 3.1% sequentially, "
+            "indicating robust and broad-based earnings expansion. The dual-horizon growth "
+            "trajectory suggests both cyclical recovery and structural improvement. "
+            "At $1.53, EPS represents a meaningful increase from prior-year levels and "
+            "positions the company ahead of consensus estimates for the current fiscal year. "
+            "Continued EPS growth at this rate would support premium valuation multiples."
+        ),
+        "financial_health": (
+            "Apple's financial health is rated EXCELLENT, supported by a net margin of "
+            "25.3% and total revenue of approximately $120 billion in the most recent period. "
+            "Operating margin of 30.1% reflects the leverage inherent in the services "
+            "business model. The combination of high margins and large absolute revenue "
+            "base generates exceptional free cash flow conversion. Balance sheet strength "
+            "further reinforces the EXCELLENT financial health designation."
+        ),
+        "margin_trend": (
+            "Net margin of 25.3% and operating margin of 30.1% represent the latest "
+            "quarterly readings across four reporting periods. The IMPROVING margin trend "
+            "indicates that services revenue — which carries higher margins than hardware — "
+            "is accounting for a growing share of the total revenue mix. Continued margin "
+            "expansion at this pace would be structurally positive for long-term earnings "
+            "power and return on equity."
+        ),
+        "balance_sheet": (
+            "Stockholders' equity represents 19.4% of total assets, reflecting the "
+            "company's disciplined capital return program via buybacks and dividends. "
+            "Total assets of $335B and total liabilities of $270B result in a balance "
+            "sheet that is highly liquid and investment-grade in all material respects. "
+            "The 19.4% equity ratio, while lower than many peers, is supported by "
+            "exceptional free cash flow generation and a long history of debt service."
+        ),
+        "sentiment": (
+            "A 7-day average sentiment score of 0.45 on the -1 to +1 scale indicates "
+            "moderately positive media sentiment, classified as BULLISH. Coverage of "
+            "78 articles over the past 30 days reflects active institutional and retail "
+            "attention. The IMPROVING sentiment trend suggests positive newsflow momentum "
+            "that is reinforcing the constructive fundamental and technical picture. "
+            "High article count combined with a 0.45 sentiment score is atypical for "
+            "periods of market stress and supports a risk-on positioning stance."
+        ),
+    }
+    return {
+        "chart_analyses": [
+            {"chart_id": cid, "analysis_text": _chart_texts[cid]}
+            for cid in [
+                "price_sma", "volatility", "revenue_growth", "eps_trend",
+                "financial_health", "margin_trend", "balance_sheet", "sentiment",
+            ]
+        ],
+        "investment_thesis": (
+            "Apple Inc. demonstrates robust financial health, with revenue growth of 8.5% "
+            "year-over-year and exceptional profit margins of 25.3%. The company continues "
+            "to outperform sector peers on multiple fundamental metrics, supported by a "
+            "strong balance sheet and improving sentiment indicators. The technical picture "
+            "reinforces the constructive fundamental view, with price action sustaining above "
+            "all three key moving averages. Valuation remains reasonable relative to peers."
+        ),
+        "mda_summary": (
+            "Management discussion highlights sustained revenue momentum and expanding "
+            "operating margins driven by services segment growth. Capital allocation "
+            "priorities include share buybacks and dividend increases."
+        ),
+        "risk_summary": (
+            "Key risks include macroeconomic headwinds, supply chain concentration, "
+            "and regulatory scrutiny in major markets. Currency fluctuations may impact "
+            "international revenue contribution."
+        ),
         "company_overview": {
             "company_description": (
                 "Apple Inc. is a multinational technology company headquartered in Cupertino, "
@@ -205,11 +303,12 @@ def pipeline_result(tmp_path):
 
 
 @pytest.fixture
-def good_artifacts(tmp_path, full_manifest, pipeline_result):
+def good_artifacts(tmp_path, full_manifest, pipeline_result, analysis_result):
     return {
         "output_dir":      str(tmp_path),
         "pipeline_result": pipeline_result,
         "chart_manifest":  full_manifest,
+        "analysis_result": analysis_result,
     }
 
 
@@ -256,13 +355,18 @@ class TestCheckCompleteness:
         score, issues = check_completeness(good_artifacts)
         assert any("chart_manifest.json" in i for i in issues)
 
+    def test_missing_analysis_result(self, good_artifacts):
+        good_artifacts["analysis_result"] = None
+        score, issues = check_completeness(good_artifacts)
+        assert any("analysis_result.json" in i for i in issues)
+
     def test_empty_analysis_text_flagged(self, good_artifacts):
-        good_artifacts["pipeline_result"]["analysis"]["chart_analyses"][0]["analysis_text"] = ""
+        good_artifacts["analysis_result"]["chart_analyses"][0]["analysis_text"] = ""
         _, issues = check_completeness(good_artifacts)
         assert any("price_sma" in i and "empty" in i.lower() for i in issues)
 
     def test_guardrail_text_flagged(self, good_artifacts):
-        good_artifacts["pipeline_result"]["analysis"]["chart_analyses"][0]["analysis_text"] = (
+        good_artifacts["analysis_result"]["chart_analyses"][0]["analysis_text"] = (
             "This analysis section has been withheld because it did not pass "
             "content safety validation."
         )
@@ -270,11 +374,19 @@ class TestCheckCompleteness:
         assert any("guardrail" in i.lower() or "fallback" in i.lower() for i in issues)
 
     def test_short_text_flagged(self, good_artifacts):
-        good_artifacts["pipeline_result"]["analysis"]["chart_analyses"][0]["analysis_text"] = (
+        good_artifacts["analysis_result"]["chart_analyses"][0]["analysis_text"] = (
             "Too short."
         )
         _, issues = check_completeness(good_artifacts)
         assert any("price_sma" in i and "short" in i.lower() for i in issues)
+
+    def test_section_text_fields_checked(self, good_artifacts):
+        good_artifacts["analysis_result"]["investment_thesis"] = ""
+        _, issues = check_completeness(good_artifacts)
+        assert any("investment_thesis" in i for i in issues)
+
+    def test_run_id_present_in_pipeline_result(self, good_artifacts):
+        assert good_artifacts["pipeline_result"].get("run_id") is not None
 
 
 # ── Data quality tests ─────────────────────────────────────────────────────
@@ -364,8 +476,7 @@ class TestConsistency:
         assert score >= 50  # good fixtures reference data values
 
     def test_number_not_cited_triggers_issue(self, good_artifacts):
-        # Replace analysis text with one that mentions no numbers
-        good_artifacts["pipeline_result"]["analysis"]["chart_analyses"][0]["analysis_text"] = (
+        good_artifacts["analysis_result"]["chart_analyses"][0]["analysis_text"] = (
             "The stock appears to be in an uptrend based on moving average analysis. "
             "Momentum looks positive across all time frames. Investors may find this "
             "trajectory encouraging as the company executes on its strategic priorities."
@@ -420,3 +531,135 @@ class TestTextQuality:
     def test_check_text_quality_no_session(self, good_artifacts):
         score, _ = check_text_quality(good_artifacts, session=None)
         assert 0 <= score <= 100
+
+
+# ── Data quality zero-value tests ─────────────────────────────────────────
+
+class TestZeroValueDataQuality:
+    def test_zero_revenue_flagged(self, good_artifacts):
+        good_artifacts["chart_manifest"][4]["data_summary"]["total_revenue"] = 0
+        _, issues = check_data_quality(good_artifacts)
+        assert any("total_revenue" in i and "zero" in i.lower() for i in issues)
+
+    def test_zero_price_flagged(self, good_artifacts):
+        good_artifacts["chart_manifest"][0]["data_summary"]["current_price"] = 0
+        _, issues = check_data_quality(good_artifacts)
+        assert any("current_price" in i and "zero" in i.lower() for i in issues)
+
+    def test_zero_volume_flagged(self, good_artifacts):
+        good_artifacts["chart_manifest"][1]["data_summary"]["avg_volume"] = 0
+        _, issues = check_data_quality(good_artifacts)
+        assert any("avg_volume" in i and "zero" in i.lower() for i in issues)
+
+    def test_negative_price_still_flagged(self, good_artifacts):
+        good_artifacts["chart_manifest"][0]["data_summary"]["current_price"] = -10.0
+        _, issues = check_data_quality(good_artifacts)
+        assert any("current_price" in i for i in issues)
+
+    def test_weights_sum_to_one_after_new_dimension(self):
+        total = sum(SCORE_WEIGHTS.values())
+        assert abs(total - 1.0) < 1e-9
+
+
+# ── PDF content tests ─────────────────────────────────────────────────────
+
+class TestPdfContent:
+    def _make_artifacts(self, pdf_path: str, manifest=None) -> dict:
+        return {
+            "pipeline_result": {
+                "ticker": "AAPL",
+                "pdf_path": str(pdf_path),
+            },
+            "chart_manifest": manifest or [],
+        }
+
+    def test_missing_pdf_returns_zero(self, tmp_path):
+        artifacts = self._make_artifacts(tmp_path / "nonexistent.pdf")
+        score, issues = check_pdf_content(artifacts)
+        assert score == 0.0
+        assert any("not found" in i.lower() for i in issues)
+
+    def test_clean_pdf_passes(self, tmp_path):
+        """A PDF with correct sections and no $0 values should score 100."""
+        try:
+            import pdfplumber  # noqa: F401
+        except ImportError:
+            pytest.skip("pdfplumber not installed")
+
+        from reportlab.platypus import SimpleDocTemplate
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet
+
+        pdf_path = tmp_path / "report.pdf"
+        styles = getSampleStyleSheet()
+        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4)
+        content = []
+        for section in [
+            "Executive Summary", "Company Overview", "Risk Factors",
+            "Investment Recommendation", "AAPL",
+        ] + ["Filler page content with numbers $185.50 and $1.53 earnings."] * 12:
+            content.append(Paragraph(section, styles["Normal"]))
+        doc.build(content)
+
+        manifest = [
+            {
+                "chart_id": "price_sma",
+                "data_summary": {"current_price": 185.50, "trend_signal": "BULLISH"},
+            },
+            {
+                "chart_id": "eps_trend",
+                "data_summary": {"latest_eps": 1.53},
+            },
+        ]
+        artifacts = self._make_artifacts(pdf_path, manifest)
+        score, issues = check_pdf_content(artifacts)
+        assert score >= 50
+
+    def test_dollar_zero_flagged(self, tmp_path):
+        """PDF containing $0 revenue values should be flagged."""
+        try:
+            import pdfplumber  # noqa: F401
+        except ImportError:
+            pytest.skip("pdfplumber not installed")
+
+        from reportlab.platypus import SimpleDocTemplate
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet
+
+        pdf_path = tmp_path / "bad_report.pdf"
+        styles = getSampleStyleSheet()
+        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4)
+        content = [
+            Paragraph("Executive Summary", styles["Normal"]),
+            Paragraph("Revenue: $0", styles["Normal"]),
+            Paragraph("Current Price: $0.00", styles["Normal"]),
+        ]
+        doc.build(content)
+
+        artifacts = self._make_artifacts(pdf_path)
+        _, issues = check_pdf_content(artifacts)
+        assert any("$0" in i for i in issues)
+
+    def test_na_saturation_flagged(self, tmp_path):
+        """PDF with many N/A values signals missing upstream data."""
+        try:
+            import pdfplumber  # noqa: F401
+        except ImportError:
+            pytest.skip("pdfplumber not installed")
+
+        from reportlab.platypus import SimpleDocTemplate
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet
+
+        pdf_path = tmp_path / "na_report.pdf"
+        styles = getSampleStyleSheet()
+        doc = SimpleDocTemplate(str(pdf_path), pagesize=A4)
+        content = [Paragraph(("N/A  " * 30), styles["Normal"])]
+        doc.build(content)
+
+        artifacts = self._make_artifacts(pdf_path)
+        _, issues = check_pdf_content(artifacts)
+        assert any("N/A" in i for i in issues)

@@ -13,6 +13,7 @@ from evaluator.rubric import (
     REQUIRED_CHART_IDS,
     DATA_BOUNDS,
     MUST_BE_POSITIVE_KEYS,
+    MUST_BE_STRICTLY_POSITIVE_KEYS,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,8 +85,14 @@ def _check_chart_data(chart_id: str, data_summary: dict) -> list[str]:
         # Must-be-positive keys
         if key in MUST_BE_POSITIVE_KEYS:
             try:
-                if float(value) < 0:
+                v = float(value)
+                if v < 0:
                     issues.append(f"{chart_id}: '{key}' = {value} should be positive")
+                elif v == 0.0 and key in MUST_BE_STRICTLY_POSITIVE_KEYS:
+                    issues.append(
+                        f"{chart_id}: '{key}' = 0 — zero value indicates missing or "
+                        "bad upstream data (data governance failure)"
+                    )
             except (TypeError, ValueError):
                 pass
 

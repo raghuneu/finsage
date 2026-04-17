@@ -7,11 +7,12 @@ All check modules import from here so the scoring model stays in one place.
 
 # ── Dimension weights (must sum to 1.0) ────────────────────────────────────
 SCORE_WEIGHTS: dict[str, float] = {
-    "completeness":  0.20,
+    "completeness":  0.15,
     "data_quality":  0.20,
-    "text_quality":  0.35,
+    "text_quality":  0.30,
     "chart_quality": 0.15,
     "consistency":   0.10,
+    "pdf_content":   0.10,
 }
 
 # ── Verdict thresholds (lower-bound inclusive) ─────────────────────────────
@@ -34,11 +35,12 @@ REQUIRED_CHART_IDS: list[str] = [
     "sentiment",
 ]
 
-# ── LLM text fields: (dot-path into pipeline_result.json, min word count) ──
+# ── LLM text fields: (dot-path into analysis_result.json, min word count) ──
+# Top-level keys match _save_analysis_result() in orchestrator.py.
 REQUIRED_TEXT_FIELDS: dict[str, int] = {
-    "analysis.investment_thesis":              50,
-    "analysis.mda_summary":                    30,
-    "analysis.risk_summary":                   30,
+    "investment_thesis":                       50,
+    "mda_summary":                             30,
+    "risk_summary":                            30,
     "company_overview.company_description":    50,
     "peer_comparison.comparison_summary":      20,
 }
@@ -99,6 +101,13 @@ MUST_BE_POSITIVE_KEYS: set[str] = {
     "avg_volume",
     "total_revenue",
     "total_articles_30d",
+}
+
+# Subset that must be strictly > 0 (zero is also a data error, e.g. $0 revenue)
+MUST_BE_STRICTLY_POSITIVE_KEYS: set[str] = {
+    "current_price",
+    "total_revenue",
+    "avg_volume",
 }
 
 

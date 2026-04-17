@@ -29,6 +29,7 @@ from evaluator.checks.data_quality   import check_data_quality
 from evaluator.checks.chart_quality  import check_chart_quality
 from evaluator.checks.consistency    import check_consistency
 from evaluator.checks.text_quality   import check_text_quality
+from evaluator.checks.pdf_content    import check_pdf_content
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,15 @@ def _generate_recommendations(results: dict[str, dict]) -> list[str]:
             + "; ".join(cons_issues[:2])
         )
 
+    # PDF content issues → re-run pipeline or investigate upstream data
+    pdf_issues = results.get("pdf_content", {}).get("issues", [])
+    if pdf_issues:
+        recs.append(
+            f"PDF content validation failed ({len(pdf_issues)} issue(s)) — "
+            "check for $0 values or missing sections: "
+            + "; ".join(pdf_issues[:2])
+        )
+
     return recs or ["No critical issues found — report is ready for publication."]
 
 
@@ -118,13 +128,30 @@ class ReportEvaluator:
         if self._artifacts is not None:
             return self._artifacts
 
-        pipeline_path = self.output_dir / "pipeline_result.json"
-        manifest_path = self.output_dir / "chart_manifest.json"
+        pipeline_path  = self.output_dir / "pipeline_result.json"
+        manifest_path  = self.output_dir / "chart_manifest.json"
+        analysis_path  = self.output_dir / "analysis_result.json"
+
+        pipeline = _load_json(pipeline_path)
+        analysis = _load_json(analysis_path)
+
+        # Backwards-compat: old pipeline_result format embedded full analysis text.
+        # New format (post-observability refactor) keeps only a summary and writes
+        # analysis text to analysis_result.json.  Prefer the dedicated file; fall
+        # back to pipeline_result for runs produced before the refactor.
+        if analysis is None and isinstance(pipeline, dict) and "analysis" in pipeline:
+            analysis = {**pipeline.get("analysis", {})}
+            # Old format kept company_overview / peer_comparison at pipeline root
+            for key in ("company_overview", "peer_comparison"):
+                if key in pipeline:
+                    analysis[key] = pipeline[key]
+            logger.debug("Using legacy inline analysis from pipeline_result.json")
 
         self._artifacts = {
             "output_dir":      str(self.output_dir),
-            "pipeline_result": _load_json(pipeline_path),
+            "pipeline_result": pipeline,
             "chart_manifest":  _load_json(manifest_path),
+            "analysis_result": analysis,  # may be None if both sources missing
         }
         return self._artifacts
 
@@ -173,6 +200,7 @@ class ReportEvaluator:
             ("data_quality",  check_data_quality,  False),
             ("chart_quality", check_chart_quality, False),
             ("consistency",   check_consistency,   False),
+            ("pdf_content",   check_pdf_content,   False),
             ("text_quality",  None,                True),
         ):
             logger.info("Running dimension: %s", name)
@@ -200,6 +228,7 @@ class ReportEvaluator:
         card = {
             "ticker":         ticker,
             "company_name":   company,
+            "run_id":         pipeline.get("run_id"),
             "report_dir":     str(self.output_dir),
             "evaluated_at":   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "llm_scoring":    session is not None,

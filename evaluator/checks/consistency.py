@@ -151,13 +151,13 @@ def check_consistency(artifacts: dict) -> tuple[float, list[str]]:
     Returns:
         (score 0-100, list of issue strings)
     """
-    pipeline = artifacts.get("pipeline_result") or {}
+    analysis = artifacts.get("analysis_result") or {}
     manifest = artifacts.get("chart_manifest") or []
 
     charts_by_id = {c.get("chart_id"): c for c in manifest}
     chart_analyses = {
         a.get("chart_id"): a.get("analysis_text", "")
-        for a in (pipeline.get("analysis", {}).get("chart_analyses") or [])
+        for a in (analysis.get("chart_analyses") or [])
     }
 
     all_issues: list[str] = []
