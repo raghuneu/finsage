@@ -24,8 +24,8 @@ export default function MetricCard({ title, value, delta, color }: MetricCardPro
         overflow: 'hidden',
         transition: 'border-color 0.25s ease, box-shadow 0.25s ease',
         '&:hover': {
-          borderColor: color || 'rgba(201,107,174,0.25)',
-          boxShadow: `0 4px 24px ${color ? color + '15' : 'rgba(201,107,174,0.08)'}`,
+          borderColor: color || 'rgba(3,183,146,0.25)',
+          boxShadow: `0 4px 24px ${color ? color + '15' : 'rgba(3,183,146,0.08)'}`,
         },
         '&::before': {
           content: '""',
@@ -36,7 +36,7 @@ export default function MetricCard({ title, value, delta, color }: MetricCardPro
           height: '2px',
           background: color
             ? `linear-gradient(90deg, ${color} 0%, transparent 100%)`
-            : 'linear-gradient(90deg, #C96BAE 0%, #0382B7 100%)',
+            : 'linear-gradient(90deg, #03B792 0%, #0382B7 100%)',
           opacity: 0.6,
         },
       }}

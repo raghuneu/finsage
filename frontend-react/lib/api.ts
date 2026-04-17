@@ -40,14 +40,20 @@ export const analyzeFilings = (ticker: string, mode: string) =>
 export const generateQuickReport = (ticker: string) =>
   api.post(`/api/report/quick`, { ticker }).then(r => r.data);
 
-export const startCAVMPipeline = (ticker: string, debug = false, skipCharts = false) =>
-  api.post(`/api/report/cavm`, { ticker, debug, skip_charts: skipCharts }).then(r => r.data);
+export const startCAVMPipeline = (ticker: string, debug = false, skipCharts = false, detailLevel = 'detailed') =>
+  api.post(`/api/report/cavm`, { ticker, debug, skip_charts: skipCharts, detail_level: detailLevel }).then(r => r.data);
 
 export const getCAVMStatus = (taskId: string) =>
   api.get(`/api/report/cavm/status/${taskId}`).then(r => r.data);
 
+export const fetchReportHistory = (ticker: string) =>
+  api.get(`/api/report/history/${ticker}`).then(r => r.data);
+
+export const fetchAvailableReportTickers = (): Promise<string[]> =>
+  api.get(`/api/report/available-tickers`).then(r => r.data);
+
 // Chat
-export const askFinSage = (ticker: string, question: string) =>
+export const askFinSage = (ticker: string, question: string): Promise<{ answer: string; missing_tickers?: string[]; error?: string }> =>
   api.post(`/api/chat/ask`, { ticker, question }).then(r => r.data);
 
 // Observability
@@ -71,6 +77,13 @@ export const fetchLLMSummary = () =>
 
 export const fetchQueryAttribution = () =>
   api.get(`/api/observability/query-attribution`).then(r => r.data);
+
+// Report Chat (conversational Q&A about generated reports)
+export const askReportChat = (ticker: string, sessionId: string, question: string, folderName?: string): Promise<{ answer: string; missing_tickers?: string[] }> =>
+  api.post(`/api/report_chat/ask`, { ticker, session_id: sessionId, question, folder_name: folderName ?? null }).then(r => r.data);
+
+export const resetReportChat = (sessionId: string) =>
+  api.post(`/api/report_chat/reset`, { session_id: sessionId }).then(r => r.data);
 
 // Meta
 export const fetchTickers = () =>
