@@ -4,6 +4,10 @@ from abc import ABC, abstractmethod
 import pandas as pd
 from typing import Optional
 from src.utils.logger import setup_logger
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import requests
+import httpx
+
 
 class BaseDataLoader(ABC):
     """Abstract base class for all data loaders"""

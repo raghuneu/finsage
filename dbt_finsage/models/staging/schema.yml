@@ -9,6 +9,7 @@ sources:
       - name: raw_fundamentals
       - name: raw_news
       - name: raw_sec_filings
+      - name: raw_sec_filing_documents
 
 models:
   - name: stg_stock_prices
@@ -28,3 +29,33 @@ models:
           - not_null
       - name: is_valid
         description: "Data quality validation flag"
+
+  - name: stg_sec_filing_documents
+    description: "Cleaned SEC filing documents with extracted MD&A and Risk Factors text"
+    columns:
+      - name: filing_id
+        description: "SEC accession number (unique filing identifier)"
+        tests:
+          - not_null
+          - unique
+      - name: ticker
+        description: "Stock ticker symbol"
+        tests:
+          - not_null
+      - name: form_type
+        description: "Filing type (10-K or 10-Q)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["10-K", "10-Q"]
+      - name: extraction_status
+        description: "Text extraction status"
+        tests:
+          - accepted_values:
+              values: ["extracted", "pending", "failed"]
+      - name: has_mda
+        description: "Whether MD&A text was extracted"
+      - name: has_risk_factors
+        description: "Whether Risk Factors text was extracted"
+      - name: data_quality_score
+        description: "Quality score 0-100"

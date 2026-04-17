@@ -21,33 +21,65 @@ FinSage implements a three-stage pipeline:
 2. **Data Analysis**: Uses multi-agent architecture with Code Agent Variable Memory (CAVM) for dynamic analysis
 3. **Report Generation**: Produces formatted reports with visualizations using two-stage writing framework
 
+## Feature Status
+
+| Feature | Status | Notes |
+|---|---|---|
+| Data ingestion pipeline (Yahoo, Alpha Vantage, NewsAPI, SEC EDGAR) | ✅ Done | Idempotent MERGE, quality scoring, incremental loading |
+| dbt staging layer (4 views) | ✅ Done | `stg_stock_prices`, `stg_fundamentals`, `stg_news`, `stg_sec_filings` |
+| dbt analytics layer (6 tables) | ✅ Done | `dim_company`, `dim_date`, `fct_stock_metrics`, `fct_fundamentals_growth`, `fct_news_sentiment_agg`, `fct_sec_financial_summary` |
+| Multi-agent CAVM PDF generation | ✅ Done | Chart → Validation → Analysis → Report, reportlab output |
+| VLM chart refinement (3-iteration loop) | ✅ Done | Snowflake Cortex `claude-sonnet-4-6` |
+| Chart retry on validation failure | ✅ Done | Up to 3 attempts per chart, pipeline aborts if >2 skipped |
+| Streamlit frontend (10 pages) | ✅ Done | Dashboard, Pipeline, Analytics, SEC, RAG, Report, Multi-Model, Guardrails, Q&A, Status |
+| AWS Bedrock Knowledge Base RAG | ✅ Done | Llama 3 with citations, cross-ticker comparison |
+| Bedrock Guardrails | ✅ Done | Investment-advice denial, PII redaction, contextual grounding |
+| Bedrock multi-model comparison + benchmarks | ✅ Done | Llama3, Titan, Mistral, Claude; results logged to `fct_model_benchmarks` |
+| Airflow DAG (daily 5 PM EST) | ✅ Done | Parallel fetch → loader gate → dbt → QC |
+| Terraform S3 infrastructure | ✅ Done | Bucket `finsage-sec-filings-808683` |
+| Cortex SENTIMENT() in staging | ✅ Done | Replaces keyword matching |
+| Loader retry + rate limiting | ✅ Done | tenacity exponential backoff, NewsAPI 5 req/min |
+| Airflow holiday-calendar aware `is_trading_day` | 🔄 In Progress | Currently weekday-only; US market holidays pending |
+| Streamlit caching rollout | 🔄 In Progress | `@st.cache_data` on Dashboard + Analytics; remaining pages pending |
+
 ## Technology Stack
 
 ### Data Engineering
 
-- **Snowflake**: Cloud data warehouse for scalable storage and compute
-- **dbt (Data Build Tool)**: SQL-based transformations with built-in testing
-- **Apache Airflow**: Workflow orchestration and scheduling (planned)
-- **Snowpark Python**: In-database Python execution
+- **Snowflake**: Cloud data warehouse + Cortex LLM/VLM (claude-sonnet-4-6, mistral-large) + Cortex SUMMARIZE/SENTIMENT
+- **dbt 1.7**: Staging views + analytics tables with tests
+- **Apache Airflow 2.8**: Daily DAG (Docker Compose, CeleryExecutor)
+- **Snowpark Python**: In-warehouse Python execution
+
+### AI / Models
+
+- **AWS Bedrock**: Knowledge Base RAG (Llama 3), Guardrails, multi-model (Llama3 / Titan / Mistral / Claude)
+- **Snowflake Cortex**: `claude-sonnet-4-6` VLM (chart critique), `mistral-large` LLM, `SUMMARIZE`, `SENTIMENT`
+- **boto3**: AWS SDK for Bedrock + S3
 
 ### Data Sources
 
-- **Yahoo Finance API**: Daily stock prices (OHLCV data)
-- **NewsAPI**: Financial news articles and sentiment
-- **Alpha Vantage**: Company fundamentals (revenue, earnings, ratios)
+- **Yahoo Finance** (yfinance): OHLCV + quarterly fundamentals
+- **Alpha Vantage**: Company fundamentals supplement
+- **NewsAPI**: News articles (rate-limited)
+- **SEC EDGAR**: 10-K / 10-Q filings + XBRL
 
-### AI/ML
+### Reporting / Frontend
 
-- **Snowflake Cortex LLM**: Built-in language models for analysis
-- **GPT-4 Vision**: Chart quality refinement (planned)
-- **Cortex Search**: Vector embeddings for semantic retrieval (planned)
+- **reportlab**: Branded PDF assembly (Midnight Teal theme)
+- **matplotlib**: 6-chart generation
+- **Streamlit**: 10-page interactive UI
+- **Plotly**: Dashboard / Analytics Explorer visualizations
 
-### Development Tools
+### Infrastructure
 
-- **Python 3.13**: Core programming language
-- **pandas**: Data manipulation
-- **Git/GitHub**: Version control
-- **dotenv**: Secure credential management
+- **Terraform**: AWS S3 infrastructure as code (`terraform/s3/`)
+- **AWS S3**: SEC filing storage (`finsage-sec-filings-808683`)
+- **Docker Compose**: Airflow stack
+
+### Dev Tooling
+
+- **Python 3.9+**, **pandas**, **tenacity** (retries), **pytest** (73 tests), **python-dotenv**
 
 ## Architecture
 
@@ -169,17 +201,49 @@ pip install snowflake-snowpark-python yfinance pandas httpx beautifulsoup4 pytho
 
 4. **Configure credentials**
 
-Create `.env` file in project root:
+Copy `.env.example` to `.env` and fill in your values:
 
+```bash
+cp .env.example .env
 ```
-SNOWFLAKE_ACCOUNT=your_account
-SNOWFLAKE_USER=your_username
-SNOWFLAKE_PASSWORD=your_password
-SNOWFLAKE_ROLE=your_role
-SNOWFLAKE_WAREHOUSE=your_warehouse
+
+```env
+# ── Snowflake Connection ──────────────────────────────
+SNOWFLAKE_ACCOUNT=
+SNOWFLAKE_USER=
+SNOWFLAKE_PASSWORD=
+SNOWFLAKE_WAREHOUSE=FINSAGE_WH
 SNOWFLAKE_DATABASE=FINSAGE_DB
 SNOWFLAKE_SCHEMA=RAW
-NEWSAPI_KEY=your_newsapi_key
+
+# ── Data Source API Keys ─────────────────────────────
+# NewsAPI (financial news ingestion, rate-limited to 5 req/min)
+NEWSAPI_KEY=
+
+# ── SEC EDGAR ────────────────────────────────────────
+SEC_USER_AGENT=
+
+# ── AWS Credentials ──────────────────────────────────
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=us-east-1
+
+# ── AWS S3 (SEC filing document storage) ─────────────
+FINSAGE_S3_BUCKET=
+
+# ── AWS Bedrock (RAG, guardrails, multi-model) ───────
+BEDROCK_KB_ID=
+BEDROCK_MODEL_ID=meta.llama3-8b-instruct-v1:0
+BEDROCK_GUARDRAIL_ID=
+BEDROCK_GUARDRAIL_VERSION=DRAFT
+# Comma-separated list of Bedrock models for multi-model comparison
+BEDROCK_MULTI_MODELS=meta.llama3-8b-instruct-v1:0,mistral.mistral-7b-instruct-v0:2,meta.llama3-70b-instruct-v1:0
+
+# ── Snowflake Cortex AI Models ───────────────────────
+# Primary LLM (analysis, chart code gen, document agent)
+CORTEX_MODEL_LLM=claude-opus-4-6
+# Primary VLM (chart critique, validation); falls back to pixtral-large
+CORTEX_MODEL_VLM=claude-sonnet-4-6
 ```
 
 5. **Initialize database**
@@ -222,36 +286,12 @@ dbt test --select staging
 python scripts/verify_staging_stock.py
 ```
 
-## Current Progress
+## Key Innovations
 
-**Completed (Week 1-2):**
-
-- ✅ Environment setup and Snowflake connection
-- ✅ RAW layer with 3 data sources
-- ✅ Production-grade loading (idempotency, quality checks, incremental)
-- ✅ dbt project with 3 staging models
-- ✅ Automated data quality testing
-
-**In Progress (Week 3):**
-
-- 🔄 Analytics layer (financial metrics calculations)
-- 🔄 CAVM architecture implementation
-
-**Planned (Week 4-8):**
-
-- 📋 Chart generation with iterative VLM refinement
-- 📋 Chain-of-Analysis (CoA) generation
-- 📋 Two-stage report writing framework
-- 📋 Airflow DAG orchestration
-- 📋 PDF report generation
-
-**Progress: ~20% complete**
-
-Key innovations being implemented:
-
-- **CAVM Architecture**: Unified programmable workspace for data, tools, and agents
-- **Iterative Vision-Enhanced Mechanism**: Chart quality improvement using VLM feedback
-- **Two-Stage Writing**: CoA generation followed by report composition
+- **CAVM Architecture**: Unified programmable workspace for data, tools, and agents (chart → validate → analyze → report)
+- **Iterative Vision-Enhanced Refinement**: Chart quality improvement via VLM critique loop
+- **Two-Stage Writing**: Chain-of-Analysis (CoA) per chart, then synthesized PDF composition
+- **Guardrailed RAG**: SEC filing Q&A with Bedrock content safety + contextual grounding
 
 ## Why These Tools?
 

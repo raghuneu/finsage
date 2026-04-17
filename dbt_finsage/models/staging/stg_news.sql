@@ -17,24 +17,24 @@ cleaned AS (
         published_at,
         ingested_at,
         data_quality_score,
-        
-        -- Add sentiment analysis (we'll enhance this later)
-        CASE 
-            WHEN LOWER(title) LIKE '%profit%' OR LOWER(title) LIKE '%growth%' THEN 'positive'
-            WHEN LOWER(title) LIKE '%loss%' OR LOWER(title) LIKE '%decline%' THEN 'negative'
+
+        SNOWFLAKE.CORTEX.SENTIMENT(COALESCE(description, title)) AS sentiment_score,
+        CASE
+            WHEN SNOWFLAKE.CORTEX.SENTIMENT(COALESCE(description, title)) > 0.1 THEN 'positive'
+            WHEN SNOWFLAKE.CORTEX.SENTIMENT(COALESCE(description, title)) < -0.1 THEN 'negative'
             ELSE 'neutral'
-        END AS sentiment,
-        
+        END                                         AS sentiment,
+
         -- Validation flag
-        CASE 
+        CASE
             WHEN title IS NULL THEN FALSE
             WHEN url IS NULL THEN FALSE
             WHEN published_at IS NULL THEN FALSE
             ELSE TRUE
         END AS is_valid
-        
+
     FROM source
-    WHERE published_at >= DATEADD(month, -3, CURRENT_DATE())  -- Last 3 months
+    WHERE published_at >= DATEADD(month, -3, CURRENT_DATE())
 )
 
 SELECT * FROM cleaned

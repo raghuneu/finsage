@@ -12,3 +12,9 @@ airflow/.env
 airflow/plugins/
 
 ignoreFiles/
+
+# Generated outputs
+outputs/
+
+# Claude Code local settings (not shared)
+.claude/settings.local.json.claude/
