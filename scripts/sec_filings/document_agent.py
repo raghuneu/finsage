@@ -1006,7 +1006,8 @@ RISK FACTORS:
 
 Generate the following sections:
 
-## 1. EXECUTIVE SUMMARY (100 words)
+## 1. EXECUTIVE SUMMARY
+#  (100 words)
 One-paragraph snapshot: what this company is, its current state, and the key takeaway.
 Include: market cap category, financial health rating, trend signal, sentiment label.
 

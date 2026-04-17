@@ -25,6 +25,7 @@ import { useTicker } from '@/lib/ticker-context';
 import { generateQuickReport, startCAVMPipeline, getCAVMStatus } from '@/lib/api';
 import SectionHeader from '@/components/SectionHeader';
 import MetricCard from '@/components/MetricCard';
+import ReportChat from '@/components/ReportChat';
 
 const REPORT_SECTIONS = [
   'Executive Summary',
@@ -347,6 +348,9 @@ export default function ReportPage() {
                   Download PDF Report
                 </Button>
               )}
+
+              {/* Chat about the generated report */}
+              <ReportChat ticker={ticker} />
             </Box>
           )}
         </Box>
