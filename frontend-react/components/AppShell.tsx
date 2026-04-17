@@ -24,6 +24,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ArticleIcon from '@mui/icons-material/Article';
 import ChatIcon from '@mui/icons-material/Chat';
+import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useTicker } from '@/lib/ticker-context';
 import { getCompanyName } from '@/lib/company-names';
@@ -36,6 +37,7 @@ const NAV_ITEMS = [
   { label: 'SEC Filings', path: '/sec', icon: <DescriptionIcon /> },
   { label: 'Report', path: '/report', icon: <ArticleIcon /> },
   { label: 'Ask FinSage', path: '/ask', icon: <ChatIcon /> },
+  { label: 'Observability', path: '/observability', icon: <MonitorHeartIcon /> },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

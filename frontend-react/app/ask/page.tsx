@@ -47,6 +47,11 @@ export default function AskFinSagePage() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+  }, [ticker]);
+
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 

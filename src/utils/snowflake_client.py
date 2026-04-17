@@ -1,6 +1,7 @@
 """Enhanced Snowflake client - refactored from your connection module"""
 
 import os
+import json
 from dotenv import load_dotenv
 from snowflake.snowpark import Session
 import pandas as pd
@@ -11,9 +12,10 @@ from .logger import setup_logger
 class SnowflakeClient:
     """Reusable Snowflake client with helper methods"""
 
-    def __init__(self):
+    def __init__(self, component: str = "default"):
         load_dotenv()
         self.session = None
+        self.component = component
         self.logger = setup_logger(__name__, 'snowflake.log')
         self._connect()
 
@@ -47,7 +49,15 @@ class SnowflakeClient:
             raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
         self.session = Session.builder.configs(connection_params).create()
-        self.logger.info("Connected to Snowflake")
+
+        # Set QUERY_TAG for observability — makes all FinSage queries
+        # attributable in ACCOUNT_USAGE.QUERY_HISTORY
+        query_tag = json.dumps({
+            "app": "finsage",
+            "component": self.component,
+        })
+        self.session.sql(f"ALTER SESSION SET QUERY_TAG = '{query_tag}'").collect()
+        self.logger.info("Connected to Snowflake (component=%s)", self.component)
 
     def get_last_loaded_date(self, table: str, ticker: str,
                              date_column: str = 'DATE') -> Optional[pd.Timestamp]:

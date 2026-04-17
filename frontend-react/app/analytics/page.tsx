@@ -401,7 +401,7 @@ function SecFinancialsTab() {
       </Typography>
     );
 
-  const latest = data[0];
+  const latest = data.find((d) => d.TOTAL_REVENUE != null) || data[0];
   const sorted = [...data].reverse().map((d) => ({
     ...d,
     PERIOD: `${d.FISCAL_YEAR} ${d.FISCAL_PERIOD}`,

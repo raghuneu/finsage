@@ -1,0 +1,64 @@
+version: 2
+
+exposures:
+  - name: react_dashboard
+    type: application
+    description: "React frontend dashboard — real-time KPIs, price charts, headlines per ticker"
+    owner:
+      name: FinSage Team
+      email: finsage@northeastern.edu
+    depends_on:
+      - ref('fct_stock_metrics')
+      - ref('dim_company')
+      - ref('fct_news_sentiment_agg')
+      - ref('fct_fundamentals_growth')
+      - ref('fct_sec_financial_summary')
+
+  - name: cavm_report_pipeline
+    type: ml
+    description: "CAVM multi-agent pipeline — chart generation, validation, LLM analysis, PDF report"
+    owner:
+      name: FinSage Team
+      email: finsage@northeastern.edu
+    depends_on:
+      - ref('fct_stock_metrics')
+      - ref('fct_fundamentals_growth')
+      - ref('fct_news_sentiment_agg')
+      - ref('fct_sec_financial_summary')
+      - ref('dim_company')
+
+  - name: streamlit_analytics_explorer
+    type: application
+    description: "Streamlit app — Analytics Explorer page with stock metrics, fundamentals, sentiment charts"
+    owner:
+      name: FinSage Team
+      email: finsage@northeastern.edu
+    depends_on:
+      - ref('fct_stock_metrics')
+      - ref('fct_fundamentals_growth')
+      - ref('fct_news_sentiment_agg')
+      - ref('fct_sec_financial_summary')
+
+  - name: ask_finsage_chat
+    type: application
+    description: "Ask FinSage chat — Cortex-powered Q&A backed by analytics tables"
+    owner:
+      name: FinSage Team
+      email: finsage@northeastern.edu
+    depends_on:
+      - ref('fct_stock_metrics')
+      - ref('dim_company')
+      - ref('fct_fundamentals_growth')
+
+  - name: airflow_data_quality_gate
+    type: application
+    description: "Airflow DAG quality check task — validates row counts and ticker coverage"
+    owner:
+      name: FinSage Team
+      email: finsage@northeastern.edu
+    depends_on:
+      - ref('fct_stock_metrics')
+      - ref('fct_fundamentals_growth')
+      - ref('fct_news_sentiment_agg')
+      - ref('fct_sec_financial_summary')
+      - ref('dim_company')
