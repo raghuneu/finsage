@@ -8,12 +8,13 @@ import {
   TextField,
   IconButton,
   Chip,
-  CircularProgress,
+  Avatar,
   Alert,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
 import { useTicker } from '@/lib/ticker-context';
 import { askFinSage } from '@/lib/api';
 import ChatMessage from '@/components/ChatMessage';
@@ -45,6 +46,11 @@ export default function AskFinSagePage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+  }, [ticker]);
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -155,11 +161,50 @@ export default function AskFinSagePage() {
           <ChatMessage key={i} role={msg.role} content={msg.content} />
         ))}
         {loading && (
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', ml: 5, mt: 1 }}>
-            <CircularProgress size={16} sx={{ color: '#C96BAE' }} />
-            <Typography variant="body2" sx={{ color: '#6B6760', fontSize: '0.8rem' }}>
-              Analyzing with Cortex...
-            </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start', ml: 0, mt: 0.5 }}>
+            <Avatar
+              sx={{
+                width: 30,
+                height: 30,
+                mt: 0.5,
+                bgcolor: 'rgba(3,130,183,0.08)',
+                color: '#0382B7',
+                flexShrink: 0,
+              }}
+            >
+              <SmartToyIcon sx={{ fontSize: 16 }} />
+            </Avatar>
+            <Box
+              sx={{
+                display: 'flex',
+                gap: 0.6,
+                alignItems: 'center',
+                px: 2,
+                py: 1.5,
+                backgroundColor: '#FAFAF8',
+                border: '1px solid rgba(3,130,183,0.10)',
+                borderRadius: '16px 16px 16px 4px',
+              }}
+            >
+              {[0, 1, 2].map((i) => (
+                <Box
+                  key={i}
+                  sx={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    backgroundColor: '#0382B7',
+                    opacity: 0.5,
+                    animation: 'pulse 1.2s ease-in-out infinite',
+                    animationDelay: `${i * 0.2}s`,
+                    '@keyframes pulse': {
+                      '0%, 80%, 100%': { opacity: 0.25, transform: 'scale(0.8)' },
+                      '40%': { opacity: 0.8, transform: 'scale(1.1)' },
+                    },
+                  }}
+                />
+              ))}
+            </Box>
           </Box>
         )}
         <div ref={messagesEndRef} />

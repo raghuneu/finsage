@@ -54,7 +54,7 @@ def get_fundamentals(
                NET_MARGIN_PCT,
                FUNDAMENTAL_SIGNAL
         FROM ANALYTICS.FCT_FUNDAMENTALS_GROWTH
-        WHERE TICKER='{ticker}' ORDER BY FISCAL_QUARTER DESC LIMIT {limit}
+        WHERE TICKER='{ticker}' ORDER BY SUBSTRING(FISCAL_QUARTER, 4) DESC, SUBSTRING(FISCAL_QUARTER, 1, 2) DESC LIMIT {limit}
     """).collect()
     return _rows_to_dicts(rows, float_cols=[
         "REVENUE", "NET_INCOME", "EPS", "REVENUE_GROWTH_QOQ_PCT",
@@ -101,7 +101,7 @@ def get_sec_financials(
                REVENUE_GROWTH_YOY_PCT,
                FINANCIAL_HEALTH
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
-        WHERE TICKER='{ticker}' ORDER BY FISCAL_YEAR DESC LIMIT {limit}
+        WHERE TICKER='{ticker}' ORDER BY FISCAL_YEAR DESC, CASE FISCAL_PERIOD WHEN 'FY' THEN 0 WHEN 'Q4' THEN 1 WHEN 'Q3' THEN 2 WHEN 'Q2' THEN 3 WHEN 'Q1' THEN 4 ELSE 5 END LIMIT {limit}
     """).collect()
     return _rows_to_dicts(rows, float_cols=[
         "TOTAL_REVENUE", "NET_INCOME", "OPERATING_MARGIN_PCT", "NET_MARGIN_PCT",

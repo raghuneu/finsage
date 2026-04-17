@@ -53,8 +53,9 @@ print(f"Loaded {len(TICKERS)} tickers from config")
 default_args = {
     'owner': 'finsage',
     'depends_on_past': False,
-    'email_on_failure': False,
+    'email_on_failure': True,
     'email_on_retry': False,
+    'email': [os.environ.get('AIRFLOW_ALERT_EMAIL', 'finsage-alerts@northeastern.edu')],
     'retries': 3,
     'retry_delay': timedelta(minutes=5),
     'execution_timeout': timedelta(hours=2),
@@ -69,6 +70,7 @@ dag = DAG(
     start_date=datetime(2026, 1, 1),
     catchup=False,
     tags=['finsage', 'data-collection'],
+    dagrun_timeout=timedelta(hours=4),
 )
 
 
@@ -79,11 +81,16 @@ def _run_in_batches(tickers: list, loader, delay_key: str = 'default', **load_kw
 
     Returns list of (ticker, success_bool) tuples.
     """
+    total = len(tickers)
     delay = BATCH_DELAYS.get(delay_key, BATCH_DELAYS['default'])
     results = []
-    for i in range(0, len(tickers), BATCH_SIZE):
+    for i in range(0, total, BATCH_SIZE):
+        batch_num = i // BATCH_SIZE + 1
+        total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
         batch = tickers[i:i + BATCH_SIZE]
-        for ticker in batch:
+        for j, ticker in enumerate(batch):
+            idx = i + j + 1
+            print(f"[{idx}/{total}] (batch {batch_num}/{total_batches}) >>> {ticker}")
             try:
                 loader.load(ticker, **load_kwargs)
                 results.append((ticker, True))
@@ -91,11 +98,11 @@ def _run_in_batches(tickers: list, loader, delay_key: str = 'default', **load_kw
                 print(f"WARNING: {ticker} failed: {e}")
                 results.append((ticker, False))
         # Delay between batches (skip after last batch)
-        if i + BATCH_SIZE < len(tickers):
-            print(f"Batch {i // BATCH_SIZE + 1} complete — sleeping {delay}s for rate limits")
+        if i + BATCH_SIZE < total:
+            print(f"Batch {batch_num}/{total_batches} complete — sleeping {delay}s for rate limits")
             time.sleep(delay)
     succeeded = sum(1 for _, ok in results if ok)
-    print(f"Finished: {succeeded}/{len(results)} tickers succeeded")
+    print(f"Finished: {succeeded}/{total} tickers succeeded")
     return results
 
 
@@ -104,7 +111,7 @@ def _run_in_batches(tickers: list, loader, delay_key: str = 'default', **load_kw
 def fetch_stock_prices():
     from src.utils.snowflake_client import SnowflakeClient
     from src.data_loaders.stock_loader import StockPriceLoader
-    sf = SnowflakeClient()
+    sf = SnowflakeClient(component="airflow_stock_loader")
     loader = StockPriceLoader(sf)
     _run_in_batches(TICKERS, loader, delay_key='default')
     sf.close()
@@ -113,7 +120,7 @@ def fetch_stock_prices():
 def fetch_fundamentals():
     from src.utils.snowflake_client import SnowflakeClient
     from src.data_loaders.fundamentals_loader import FundamentalsLoader
-    sf = SnowflakeClient()
+    sf = SnowflakeClient(component="airflow_fundamentals_loader")
     loader = FundamentalsLoader(sf)
     _run_in_batches(TICKERS, loader, delay_key='default')
     sf.close()
@@ -122,7 +129,7 @@ def fetch_fundamentals():
 def fetch_news():
     from src.utils.snowflake_client import SnowflakeClient
     from src.data_loaders.news_loader import NewsLoader
-    sf = SnowflakeClient()
+    sf = SnowflakeClient(component="airflow_news_loader")
     loader = NewsLoader(sf)
     _run_in_batches(TICKERS, loader, delay_key='news')
     sf.close()
@@ -133,7 +140,7 @@ def fetch_sec_data():
     from src.utils.snowflake_client import SnowflakeClient
     from src.data_loaders.sec_loader import SECFilingLoader
     from src.data_loaders.xbrl_loader import XBRLLoader
-    sf = SnowflakeClient()
+    sf = SnowflakeClient(component="airflow_sec_loader")
     text_loader = SECFilingLoader(sf)
     xbrl_loader = XBRLLoader(sf)
     delay = BATCH_DELAYS['default']
@@ -187,7 +194,7 @@ def check_loaders_success():
     We require at least MIN_TICKER_COVERAGE distinct tickers with new data today.
     """
     from src.utils.snowflake_client import SnowflakeClient
-    sf = SnowflakeClient()
+    sf = SnowflakeClient(component="airflow_loader_gate")
     raw_tables = [
         'RAW.RAW_STOCK_PRICES',
         'RAW.RAW_FUNDAMENTALS',
@@ -218,7 +225,7 @@ def check_loaders_success():
 def data_quality_check():
     """Basic data quality checks on analytics tables"""
     from src.utils.snowflake_client import SnowflakeClient
-    sf = SnowflakeClient()
+    sf = SnowflakeClient(component="airflow_quality_check")
     tables = [
         'ANALYTICS.FCT_STOCK_METRICS',
         'ANALYTICS.FCT_FUNDAMENTALS_GROWTH',
@@ -295,10 +302,28 @@ task_quality_check = PythonOperator(
     dag=dag,
 )
 
+
+def snapshot_quality_metrics():
+    """Capture data quality scores from RAW tables into FCT_DATA_QUALITY_HISTORY."""
+    from src.utils.snowflake_client import SnowflakeClient
+    from src.utils.observability import snapshot_data_quality
+    sf = SnowflakeClient(component="airflow_quality_snapshot")
+    rows = snapshot_data_quality(sf.session)
+    print(f"Quality snapshot captured: {rows} table-ticker groups recorded")
+    sf.close()
+
+
+task_quality_snapshot = PythonOperator(
+    task_id='snapshot_quality_metrics',
+    python_callable=snapshot_quality_metrics,
+    dag=dag,
+)
+
 # ── Task dependencies ────────────────────────────────────────
 # All data fetchers run in parallel, then dbt staging, then analytics, then QC
 [task_fetch_stocks, task_fetch_fundamentals, task_fetch_news, task_fetch_sec, task_fetch_s3_filings] \
     >> task_check_loaders \
     >> task_run_dbt_staging \
     >> task_run_dbt_analytics \
-    >> task_quality_check
+    >> task_quality_check \
+    >> task_quality_snapshot

@@ -14,7 +14,7 @@ interface MetricCardProps {
 
 export default function MetricCard({ title, value, delta, color }: MetricCardProps) {
   const isPositive = delta ? !delta.startsWith('-') : true;
-  const deltaColor = isPositive ? '#9DCBB8' : '#E58B6D';
+  const deltaColor = isPositive ? '#1A9E60' : '#C9392C';
 
   return (
     <Card
@@ -75,7 +75,7 @@ export default function MetricCard({ title, value, delta, color }: MetricCardPro
             )}
             <Typography
               variant="caption"
-              sx={{ color: deltaColor, fontWeight: 600, fontSize: '0.75rem' }}
+              sx={{ color: deltaColor, fontWeight: 700, fontSize: '0.75rem' }}
             >
               {delta}
             </Typography>

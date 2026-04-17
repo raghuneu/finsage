@@ -50,6 +50,28 @@ export const getCAVMStatus = (taskId: string) =>
 export const askFinSage = (ticker: string, question: string) =>
   api.post(`/api/chat/ask`, { ticker, question }).then(r => r.data);
 
+// Observability
+export const fetchHealthChecks = () =>
+  api.get(`/api/observability/health-checks`).then(r => r.data);
+
+export const fetchPipelineRuns = (limit = 50) =>
+  api.get(`/api/observability/pipeline-runs`, { params: { limit } }).then(r => r.data);
+
+export const fetchPipelineSummary = () =>
+  api.get(`/api/observability/pipeline-runs/summary`).then(r => r.data);
+
+export const fetchDataQuality = (days = 7) =>
+  api.get(`/api/observability/data-quality`, { params: { days } }).then(r => r.data);
+
+export const fetchLLMCalls = (limit = 50) =>
+  api.get(`/api/observability/llm-calls`, { params: { limit } }).then(r => r.data);
+
+export const fetchLLMSummary = () =>
+  api.get(`/api/observability/llm-calls/summary`).then(r => r.data);
+
+export const fetchQueryAttribution = () =>
+  api.get(`/api/observability/query-attribution`).then(r => r.data);
+
 // Meta
 export const fetchTickers = () =>
   api.get(`/api/tickers`).then(r => r.data);

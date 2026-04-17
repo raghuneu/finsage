@@ -41,6 +41,7 @@ from chart_specs import CANONICAL_CHART_ORDER
 from validation_agent import validate_all_charts, validate_chart
 from analysis_agent import run_analysis, generate_company_overview, generate_peer_comparison, generate_financial_deep_dive, generate_valuation_analysis
 from report_agent import generate_report
+from src.utils.observability import RunContext, PipelineTracker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -356,9 +357,14 @@ def generate_report_pipeline(
 
     start_time = datetime.now()
 
+    # ── Observability: create run context and tracker ─────
+    ctx = RunContext(pipeline_type="CAVM", ticker=ticker)
+    logger.info("Pipeline run_id=%s for %s", ctx.run_id, ticker)
+
     print("\n" + "═" * 60)
     print(f"  FinSage CAVM Pipeline")
     print(f"  Ticker: {ticker}  |  {resolve_company_name(ticker)}")
+    print(f"  Run ID: {ctx.run_id}")
     print(f"  Started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     if debug:
         print(f"  Mode: DEBUG (all chart iterations saved)")
@@ -372,10 +378,20 @@ def generate_report_pipeline(
     os.makedirs(run_dir, exist_ok=True)
 
     session = get_session()
+
+    # Tag all Snowflake queries with run_id for ACCOUNT_USAGE attribution
+    try:
+        query_tag = json.dumps({"app": "finsage", "component": "cavm_pipeline", "run_id": ctx.run_id})
+        session.sql(f"ALTER SESSION SET QUERY_TAG = '{query_tag}'").collect()
+    except Exception:
+        logger.warning("Could not set QUERY_TAG on session")
+
+    tracker = PipelineTracker(session, ctx)
     pdf_path = None
 
     try:
         # ── Stage 1: Charts ──────────────────────────────────
+        tracker.start_stage("chart_generation")
         if skip_charts:
             if charts_dir:
                 charts = load_existing_charts(charts_dir)
@@ -388,9 +404,14 @@ def generate_report_pipeline(
             charts = stage_charts(session, ticker, run_dir, debug=debug)
 
         if not charts:
+            tracker.end_stage("chart_generation", status="FAILED",
+                              error_message="No charts generated")
             raise RuntimeError("No charts generated — cannot proceed")
+        tracker.end_stage("chart_generation", status="SUCCESS",
+                          rows_affected=len(charts))
 
         # ── Stage 2: Validation with retry ───────────────────
+        tracker.start_stage("validation")
         validated_charts = stage_validation(session, charts)
 
         MAX_ATTEMPTS = 3
@@ -430,6 +451,10 @@ def generate_report_pipeline(
         chart_order_map = {cid: idx for idx, cid in enumerate(CANONICAL_CHART_ORDER)}
         passing_charts.sort(key=lambda c: chart_order_map.get(c.get("chart_id", ""), 99))
 
+        tracker.end_stage("validation", status="SUCCESS",
+                          rows_affected=len(passing_charts),
+                          metadata={"skipped": len(skipped), "total": len(validated_charts)})
+
         if len(skipped) > 2:
             details = "; ".join(f"{cid}: {r}" for cid, r in skipped)
             raise RuntimeError(
@@ -442,12 +467,21 @@ def generate_report_pipeline(
             )
 
         # ── Stage 3: Analysis (only passing charts) ──────────
+        tracker.start_stage("analysis")
         analysis = stage_analysis(session, passing_charts, ticker)
+        tracker.end_stage("analysis", status="SUCCESS",
+                          rows_affected=len(analysis.get("chart_analyses", [])))
 
         # ── Stage 4: Report (only passing charts) ────────────
+        tracker.start_stage("report_generation")
         pdf_path = stage_report(ticker, passing_charts, analysis, run_dir)
+        tracker.end_stage("report_generation", status="SUCCESS")
 
     except Exception as e:
+        # Record failure for whichever stage was in-flight
+        for stage_name in list(tracker._stage_starts.keys()):
+            tracker.end_stage(stage_name, status="FAILED",
+                              error_message=str(e)[:500])
         logger.error("Pipeline failed: %s", e, exc_info=True)
         raise
     finally:
@@ -458,10 +492,12 @@ def generate_report_pipeline(
     result = save_pipeline_result(
         ticker, validated_charts, analysis, pdf_path, run_dir, elapsed
     )
+    result["run_id"] = ctx.run_id
 
     print("\n" + "═" * 60)
-    print(f"  ✅ FinSage Pipeline Complete!")
+    print(f"  FinSage Pipeline Complete!")
     print(f"  Ticker:   {ticker}")
+    print(f"  Run ID:   {ctx.run_id}")
     print(f"  Elapsed:  {elapsed:.0f}s ({elapsed/60:.1f} min)")
     print(f"  Charts:   {len(validated_charts)} generated")
     print(f"  PDF:      {pdf_path}")
@@ -471,6 +507,7 @@ def generate_report_pipeline(
 
     return {
         "ticker": ticker,
+        "run_id": ctx.run_id,
         "pdf_path": pdf_path,
         "elapsed_seconds": elapsed,
         "charts": validated_charts,

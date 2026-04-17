@@ -200,9 +200,11 @@ export default function SECFilingPage() {
             <TableBody>
               {filings.map((row, i) => (
                 <TableRow key={i}>
-                  {Object.values(row).map((val, j) => (
+                  {Object.entries(row).map(([col, val], j) => (
                     <TableCell key={j} sx={{ fontSize: '0.75rem', borderColor: '#E8E4DB' }}>
-                      {String(val ?? '')}
+                      {col === 'COMPANY_NAME' && typeof val === 'string'
+                        ? val.replace(/\b\w+/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+                        : String(val ?? '')}
                     </TableCell>
                   ))}
                 </TableRow>

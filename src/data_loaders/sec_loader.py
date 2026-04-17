@@ -20,7 +20,7 @@ class SECFilingLoader(BaseDataLoader):
     def __init__(self, sf_client):
         super().__init__(sf_client)
         self.base_url = 'https://data.sec.gov'
-        self.user_agent = os.getenv('SEC_USER_AGENT', 'FinSage NEU vedanarayanan.s@northeastern.edu')
+        self.user_agent = os.getenv('SEC_USER_AGENT', 'FinSage Research (Northeastern University)')
         self.headers = {
             'User-Agent': self.user_agent,
             'Accept-Encoding': 'gzip, deflate',
