@@ -46,6 +46,7 @@ import SignalBadge from '@/components/SignalBadge';
 import SectionHeader from '@/components/SectionHeader';
 import PriceChart from '@/components/PriceChart';
 import { ChartSkeleton } from '@/components/LoadingSkeleton';
+import { getSignalColor } from '@/lib/signal-colors';
 
 function fmtMoney(val: number | null | undefined): string {
   if (val == null) return 'N/A';
@@ -149,7 +150,7 @@ function StockMetricsTab() {
 
   return (
     <Box>
-      <SectionHeader title="Stock Metrics" subtitle="Price history, moving averages, and volatility" />
+      <SectionHeader title="Stock Metrics" subtitle="Price history, moving averages, and volatility" accentColor={getSignalColor(latest.TREND_SIGNAL as string)} />
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 4 }}>
           <Typography variant="body2" component="span" sx={{ color: '#6B6760' }}>
@@ -218,7 +219,7 @@ function FundamentalsTab() {
 
   return (
     <Box>
-      <SectionHeader title="Fundamentals Growth" subtitle="Quarterly financials and growth rates" />
+      <SectionHeader title="Fundamentals Growth" subtitle="Quarterly financials and growth rates" accentColor={getSignalColor(latest.FUNDAMENTAL_SIGNAL as string)} />
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 4 }}>
           <Typography variant="body2" component="span" sx={{ color: '#6B6760' }}>
@@ -314,7 +315,7 @@ function SentimentTab() {
 
   return (
     <Box>
-      <SectionHeader title="News Sentiment" subtitle="Daily sentiment aggregation from news articles" />
+      <SectionHeader title="News Sentiment" subtitle="Daily sentiment aggregation from news articles" accentColor={getSignalColor(latest.SENTIMENT_LABEL as string)} />
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 4 }}>
           <Typography variant="body2" component="span" sx={{ color: '#6B6760' }}>
@@ -409,7 +410,7 @@ function SecFinancialsTab() {
 
   return (
     <Box>
-      <SectionHeader title="SEC Financial Summary" subtitle="Financials extracted from SEC filings (XBRL)" />
+      <SectionHeader title="SEC Financial Summary" subtitle="Financials extracted from SEC filings (XBRL)" accentColor={getSignalColor(latest.FINANCIAL_HEALTH as string)} />
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 4 }}>
           <Typography variant="body2" component="span" sx={{ color: '#6B6760' }}>

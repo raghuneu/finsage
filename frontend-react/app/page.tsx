@@ -21,6 +21,7 @@ import SignalBadge from '@/components/SignalBadge';
 import SectionHeader from '@/components/SectionHeader';
 import PriceChart from '@/components/PriceChart';
 import { DashboardSkeleton } from '@/components/LoadingSkeleton';
+import { getSignalColor } from '@/lib/signal-colors';
 
 function fmtMoney(val: number | null | undefined): string {
   if (val == null) return 'N/A';
@@ -73,10 +74,16 @@ export default function DashboardPage() {
     { label: 'Financial Health', signal: secFin.financial_health as string },
   ];
 
+  // Worst-of-4 color for the Market Signals header
+  const signalColors = signals.map((s) => getSignalColor(s.signal));
+  const RED = '#C9392C';
+  const AMBER = '#C08C00';
+  const marketSignalColor = signalColors.includes(RED) ? RED : signalColors.includes(AMBER) ? AMBER : signalColors[0];
+
   return (
     <Box>
       {/* KPI Cards */}
-      <SectionHeader title="Key Metrics" subtitle="Latest data from the analytics layer" />
+      <SectionHeader title="Key Metrics" subtitle="Latest data from the analytics layer" accentColor={getSignalColor(stock.trend_signal as string)} />
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, md: 2.4 }}>
           <MetricCard title="Market Cap" value={fmtMoney(profile.market_cap as number)} />
@@ -119,7 +126,7 @@ export default function DashboardPage() {
       </Grid>
 
       {/* Signal Strip — unified card with all 4 signals */}
-      <SectionHeader title="Market Signals" />
+      <SectionHeader title="Market Signals" accentColor={marketSignalColor} />
       <Card sx={{ mb: 3 }}>
         <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
           <Box
@@ -165,7 +172,7 @@ export default function DashboardPage() {
       <Divider sx={{ mb: 3 }} />
 
       {/* Price Chart */}
-      <SectionHeader title="Price History" subtitle="Last 90 trading days with moving averages" />
+      <SectionHeader title="Price History" subtitle="Last 90 trading days with moving averages" accentColor={getSignalColor(stock.trend_signal as string)} />
       <Card sx={{ mb: 3, p: 2 }}>
         {(priceData as unknown[]).length > 0 ? (
           <PriceChart data={priceData as never[]} height={450} />
@@ -179,7 +186,7 @@ export default function DashboardPage() {
       <Divider sx={{ mb: 3 }} />
 
       {/* Headlines */}
-      <SectionHeader title="Recent Headlines" subtitle="Latest news articles from the data pipeline" />
+      <SectionHeader title="Recent Headlines" subtitle="Latest news articles from the data pipeline" accentColor={getSignalColor(sentiment.sentiment_label as string)} />
       <Card>
         {(headlines as unknown[]).length > 0 ? (
           <List disablePadding>

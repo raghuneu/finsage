@@ -14,7 +14,7 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     background: {
-      default: '#FAFAF7',
+      default: '#F4F2ED',
       paper: '#FFFFFF',
     },
     primary: {
@@ -89,7 +89,7 @@ const theme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         body: {
-          backgroundColor: '#FAFAF7',
+          backgroundColor: '#F4F2ED',
           scrollbarWidth: 'thin',
           scrollbarColor: '#D8D4CB transparent',
         },
@@ -124,7 +124,7 @@ const theme = createTheme({
     MuiAppBar: {
       styleOverrides: {
         root: {
-          backgroundColor: '#FAFAF7',
+          backgroundColor: '#F4F2ED',
           borderBottom: '1px solid #E8E4DB',
           boxShadow: 'none',
         },
@@ -162,11 +162,11 @@ const theme = createTheme({
         {
           props: { variant: 'contained', color: 'primary' },
           style: {
-            background: 'linear-gradient(135deg, #03B792 0%, #0382B7 100%)',
+            background: '#03B792',
             color: '#FFFFFF',
             boxShadow: '0 2px 12px rgba(3,183,146,0.2)',
             '&:hover': {
-              background: 'linear-gradient(135deg, #36CCAB 0%, #2A9DD0 100%)',
+              background: '#36CCAB',
               boxShadow: '0 4px 20px rgba(3,183,146,0.3)',
             },
           },

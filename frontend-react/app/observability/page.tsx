@@ -103,7 +103,7 @@ function HealthTab() {
 
   return (
     <Box>
-      <SectionHeader title="System Health" subtitle="Latest status of each monitored component" />
+      <SectionHeader title="System Health" subtitle="Latest status of each monitored component" accentColor={healthyCount === total && total > 0 ? COLORS.healthy : total > 0 ? COLORS.down : undefined} />
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard
@@ -195,7 +195,7 @@ function PipelineTab() {
 
   return (
     <Box>
-      <SectionHeader title="Pipeline Runs" subtitle="Stage-level execution tracking across all pipelines" />
+      <SectionHeader title="Pipeline Runs" subtitle="Stage-level execution tracking across all pipelines" accentColor={failCount > 0 ? COLORS.down : runs.length > 0 ? COLORS.healthy : undefined} />
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard title="Total Stages" value={String(runs.length)} color={COLORS.primary} />
@@ -309,10 +309,12 @@ function QualityTab() {
   const lineData = Object.values(chartData).sort((a, b) => (a.date as string).localeCompare(b.date as string));
 
   const tableColors = ['#0382B7', '#03B792', '#1A9E60', '#E5A030', '#E58B6D'];
+  const overallAvg = data.reduce((a, d) => a + Number(d.AVG_SCORE), 0) / data.length;
+  const qualityColor = overallAvg >= 80 ? COLORS.healthy : overallAvg >= 60 ? COLORS.degraded : COLORS.down;
 
   return (
     <Box>
-      <SectionHeader title="Data Quality" subtitle="Quality score trends across RAW tables (last 14 days)" />
+      <SectionHeader title="Data Quality" subtitle="Quality score trends across RAW tables (last 14 days)" accentColor={qualityColor} />
 
       <Card sx={{ p: 2, mb: 3 }}>
         <ResponsiveContainer width="100%" height={300}>
@@ -393,7 +395,7 @@ function LLMTab() {
 
   return (
     <Box>
-      <SectionHeader title="LLM / VLM Calls" subtitle="Model invocation tracking with latency and token usage" />
+      <SectionHeader title="LLM / VLM Calls" subtitle="Model invocation tracking with latency and token usage" accentColor={failures > 0 ? COLORS.down : totalCalls > 0 ? COLORS.healthy : undefined} />
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard title="Total Calls" value={String(totalCalls)} color={COLORS.primary} />

@@ -10,6 +10,7 @@ import {
   Stepper,
   Step,
   StepLabel,
+  StepConnector,
   Chip,
   CircularProgress,
   Alert,
@@ -137,12 +138,18 @@ export default function ReportPage() {
                 key={s}
                 label={`${i + 1}. ${s}`}
                 size="small"
-                sx={{
-                  backgroundColor: 'rgba(3,183,146,0.08)',
-                  color: '#03B792',
-                  border: '1px solid rgba(3,183,146,0.18)',
-                  fontSize: '0.75rem',
-                }}
+                    sx={{
+                      backgroundColor: '#F4F2ED',
+                      color: '#6B6760',
+                      border: '1px solid #E8E4DB',
+                      fontSize: '0.75rem',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        backgroundColor: 'rgba(2,149,116,0.08)',
+                        color: '#029574',
+                        borderColor: 'rgba(2,149,116,0.22)',
+                      },
+                    }}
               />
             ))}
           </Box>
@@ -157,7 +164,8 @@ export default function ReportPage() {
             sx={{
               cursor: 'pointer',
               borderColor: reportType === 'quick' ? '#03B792' : '#E8E4DB',
-              transition: 'border-color 0.25s ease',
+              backgroundColor: reportType === 'quick' ? 'rgba(3,183,146,0.04)' : 'transparent',
+              transition: 'border-color 0.25s ease, background-color 0.25s ease',
               height: '100%',
             }}
           >
@@ -172,7 +180,7 @@ export default function ReportPage() {
               >
                 Quick Report
               </Typography>
-              <Typography variant="body2" sx={{ color: '#6B6760', mt: 1 }}>
+              <Typography variant="body2" sx={{ color: '#3D3A36', mt: 1 }}>
                 Generates a Markdown report using Snowflake Cortex LLM and SEC filing analysis. Typically
                 completes in 30-60 seconds.
               </Typography>
@@ -185,7 +193,8 @@ export default function ReportPage() {
             sx={{
               cursor: 'pointer',
               borderColor: reportType === 'cavm-summary' ? '#03B792' : '#E8E4DB',
-              transition: 'border-color 0.25s ease',
+              backgroundColor: reportType === 'cavm-summary' ? 'rgba(3,183,146,0.04)' : 'transparent',
+              transition: 'border-color 0.25s ease, background-color 0.25s ease',
               height: '100%',
             }}
           >
@@ -200,7 +209,7 @@ export default function ReportPage() {
               >
                 Summary PDF Report
               </Typography>
-              <Typography variant="body2" sx={{ color: '#6B6760', mt: 1 }}>
+              <Typography variant="body2" sx={{ color: '#3D3A36', mt: 1 }}>
                 CAVM pipeline with charts and condensed analysis. Produces an 8-10 page branded PDF
                 with key insights only. Typically takes 3-8 minutes.
               </Typography>
@@ -213,7 +222,8 @@ export default function ReportPage() {
             sx={{
               cursor: 'pointer',
               borderColor: reportType === 'cavm' ? '#03B792' : '#E8E4DB',
-              transition: 'border-color 0.25s ease',
+              backgroundColor: reportType === 'cavm' ? 'rgba(3,183,146,0.04)' : 'transparent',
+              transition: 'border-color 0.25s ease, background-color 0.25s ease',
               height: '100%',
             }}
           >
@@ -228,7 +238,7 @@ export default function ReportPage() {
               >
                 Full CAVM Pipeline
               </Typography>
-              <Typography variant="body2" sx={{ color: '#6B6760', mt: 1 }}>
+              <Typography variant="body2" sx={{ color: '#3D3A36', mt: 1 }}>
                 Generates a branded 15-20 page PDF with VLM-refined charts, chain-of-analysis validation,
                 and an investment thesis. Typically takes 5-15 minutes.
               </Typography>
@@ -280,7 +290,25 @@ export default function ReportPage() {
         <Box>
           {/* Pipeline stepper */}
           <Card sx={{ mb: 3, p: 2 }}>
-            <Stepper activeStep={cavm.stage} alternativeLabel>
+            <Stepper
+              activeStep={cavm.stage}
+              alternativeLabel
+              connector={
+                <StepConnector
+                  sx={{
+                    '& .MuiStepConnector-line': {
+                      borderColor: '#C4BFB5',
+                      borderTopStyle: 'dashed',
+                      borderTopWidth: 3,
+                    },
+                    '&.Mui-active .MuiStepConnector-line, &.Mui-completed .MuiStepConnector-line': {
+                      borderColor: '#03B792',
+                      borderTopStyle: 'solid',
+                    },
+                  }}
+                />
+              }
+            >
               {CAVM_STAGES.map((label, i) => (
                 <Step key={label} completed={i < cavm.stage}>
                   <StepLabel
@@ -288,11 +316,12 @@ export default function ReportPage() {
                       '& .MuiStepLabel-label': {
                         color:
                           i < cavm.stage
-                            ? '#9DCBB8'
+                            ? '#03B792'
                             : i === cavm.stage && cavm.status === 'running'
                             ? '#0382B7'
-                            : '#6B6760',
+                            : '#7A756F',
                         fontSize: '0.8rem',
+                        fontWeight: i <= cavm.stage ? 600 : 500,
                       },
                     }}
                   >
