@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
-from routers import dashboard, analytics, sec, report, chat, pipeline, observability
+from routers import dashboard, analytics, sec, report, chat, pipeline, observability, report_chat_router
 
 logger = logging.getLogger("finsage.api")
 
@@ -50,6 +50,7 @@ app.include_router(report.router, prefix="/api/report", tags=["report"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"])
 app.include_router(observability.router, prefix="/api/observability", tags=["observability"])
+app.include_router(report_chat_router.router, prefix="/api/report_chat", tags=["report_chat"])
 
 # Serve generated PDFs / chart images
 outputs_dir = Path(__file__).resolve().parent.parent.parent / "outputs"
