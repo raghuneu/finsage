@@ -46,6 +46,9 @@ export const startCAVMPipeline = (ticker: string, debug = false, skipCharts = fa
 export const getCAVMStatus = (taskId: string) =>
   api.get(`/api/report/cavm/status/${taskId}`).then(r => r.data);
 
+export const fetchReportHistory = (ticker: string) =>
+  api.get(`/api/report/history/${ticker}`).then(r => r.data);
+
 // Chat
 export const askFinSage = (ticker: string, question: string) =>
   api.post(`/api/chat/ask`, { ticker, question }).then(r => r.data);

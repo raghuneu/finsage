@@ -107,12 +107,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           Active Ticker
         </Typography>
         <Autocomplete
+          freeSolo
           value={ticker}
-          onChange={(_, v) => v && setTicker(v)}
+          onChange={(_, v) => v && setTicker(v as string)}
           options={tickers}
           size="small"
           disableClearable
-          sx={{ mt: 0.5, backgroundColor: 'rgba(3,130,183,0.06)', borderRadius: '8px' }}
+          sx={{ mt: 0.5, backgroundColor: 'rgba(3,130,183,0.06)', border: '1px solid rgba(3,130,183,0.15)', borderRadius: '8px' }}
           renderOption={(props, option) => (
             <li {...props} key={option}>
               <Box sx={{ display: 'flex', flexDirection: 'column' }}>
@@ -188,7 +189,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <ListItemIcon
                 sx={{
                   minWidth: 34,
-                  color: isActive ? '#2C2A25' : '#9A9590',
+                  color: isActive ? '#2C2A25' : '#6B7280',
                   '& .MuiSvgIcon-root': { fontSize: '1.15rem' },
                 }}
               >
@@ -201,7 +202,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     sx: {
                       fontSize: '0.82rem',
                       fontWeight: isActive ? 600 : 400,
-                      color: isActive ? '#2C2A25' : '#9A9590',
+                  color: isActive ? '#2C2A25' : '#6B7280',
                       letterSpacing: '0.01em',
                     },
                   },

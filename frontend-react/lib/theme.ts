@@ -117,7 +117,7 @@ const theme = createTheme({
       styleOverrides: {
         paper: {
           backgroundColor: '#F2F0EB',
-          borderRight: '1px solid #E8E4DB',
+          borderRight: '1px solid #E5E7EB',
         },
       },
     },

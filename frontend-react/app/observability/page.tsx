@@ -65,7 +65,10 @@ function statusColor(status: string): string {
   const s = (status || '').toUpperCase();
   if (s === 'HEALTHY' || s === 'SUCCESS') return COLORS.healthy;
   if (s === 'DEGRADED') return COLORS.degraded;
-  return COLORS.down;
+  if (s === 'FAILED' || s === 'ERROR') return COLORS.down;
+  if (s === 'STARTED' || s === 'RUNNING' || s === 'IN_PROGRESS' || s === 'PENDING')
+    return COLORS.primary;
+  return COLORS.muted;
 }
 
 function StatusChip({ status }: { status: string }) {
@@ -189,8 +192,13 @@ function PipelineTab() {
 
   const successCount = runs.filter((r) => (r.STATUS as string) === 'SUCCESS').length;
   const failCount = runs.filter((r) => (r.STATUS as string) === 'FAILED').length;
-  const avgDuration = runs.length > 0
-    ? (runs.reduce((a, r) => a + (Number(r.DURATION_SECONDS) || 0), 0) / runs.length).toFixed(1)
+  const inProgressCount = runs.filter((r) => {
+    const s = (r.STATUS as string || '').toUpperCase();
+    return s === 'STARTED' || s === 'RUNNING' || s === 'IN_PROGRESS' || s === 'PENDING';
+  }).length;
+  const completedRuns = runs.filter((r) => Number(r.DURATION_SECONDS) > 0);
+  const avgDuration = completedRuns.length > 0
+    ? (completedRuns.reduce((a, r) => a + Number(r.DURATION_SECONDS), 0) / completedRuns.length).toFixed(1)
     : '0';
 
   return (
@@ -198,13 +206,13 @@ function PipelineTab() {
       <SectionHeader title="Pipeline Runs" subtitle="Stage-level execution tracking across all pipelines" accentColor={failCount > 0 ? COLORS.down : runs.length > 0 ? COLORS.healthy : undefined} />
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, md: 3 }}>
-          <MetricCard title="Total Stages" value={String(runs.length)} color={COLORS.primary} />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard title="Succeeded" value={String(successCount)} color={COLORS.healthy} />
         </Grid>
         <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard title="Failed" value={String(failCount)} color={failCount > 0 ? COLORS.down : COLORS.healthy} />
+        </Grid>
+        <Grid size={{ xs: 6, md: 3 }}>
+          <MetricCard title="In Progress" value={String(inProgressCount)} color={COLORS.primary} />
         </Grid>
         <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard title="Avg Duration" value={`${avgDuration}s`} color={COLORS.accent} />

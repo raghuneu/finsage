@@ -6,6 +6,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from '@/lib/theme';
 import { TickerProvider } from '@/lib/ticker-context';
+import { ReportProvider } from '@/lib/report-context';
 import AppShell from '@/components/AppShell';
 
 export default function ThemeRegistry({ children }: { children: React.ReactNode }) {
@@ -14,7 +15,9 @@ export default function ThemeRegistry({ children }: { children: React.ReactNode 
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <TickerProvider>
-          <AppShell>{children}</AppShell>
+          <ReportProvider>
+            <AppShell>{children}</AppShell>
+          </ReportProvider>
         </TickerProvider>
       </ThemeProvider>
     </AppRouterCacheProvider>
