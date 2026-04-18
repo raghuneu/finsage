@@ -13,8 +13,7 @@ The system combines a Snowflake data warehouse with AWS Bedrock AI services and 
 ### Environment Setup
 ```bash
 source venv/bin/activate
-pip install -r requirements.txt          # core deps
-pip install -r requirements_2.txt        # includes Airflow + dbt
+pip install -r requirements.txt          # all local dev deps
 ```
 
 ### Data Pipeline
@@ -184,7 +183,7 @@ finsage-project/
 ├── app.py                      # Streamlit frontend (10 pages)
 ├── outputs/                    # Generated reports: <TICKER>_<YYYYMMDD>_<HHMMSS>/
 ├── POCs/                       # Proof of concept scripts (Cortex, chart generation)
-└── requirements.txt / requirements_2.txt
+└── requirements.txt / requirements-airflow.txt
 ```
 
 ## Output
