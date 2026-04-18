@@ -28,6 +28,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import re
+
 from datetime import datetime
 from pathlib import Path
 
@@ -236,6 +238,7 @@ def execute_chart_code(code: str, df: pd.DataFrame, output_path: str):
         ".legend(lines1 + lines2)",
         ".legend(lines1 + lines2, labels1 + labels2)"
     )
+    code = re.sub(r'\(20\d\d-20\d\d\)', '', code)
 
     runner = textwrap.dedent(f"""
 import pandas as pd
@@ -317,17 +320,16 @@ def prompt_iter1(ticker: str, df: pd.DataFrame) -> str:
 
 def prompt_critique_1(ticker: str) -> str:
     return (
-        f"You are a VLM (Vision-Language Model) critiquing a {ticker} stock chart "
-        "for inclusion in a professional equity research report.\n\n"
-        "Evaluate these four dimensions:\n"
-        "1. Information density — what key financial data is missing?\n"
-        "2. Label clarity — are axes, units, and series properly labeled?\n"
-        "3. Visual quality — is the styling appropriate for a professional report?\n"
-        "4. Missing standard elements — what do equity research charts normally include?\n\n"
-        "List exactly 3-4 specific, actionable issues. Start each with ❌.\n"
-        "Total response: 3-5 sentences. Plain text only."
+        f"You are a top-tier visualization critic refining a {ticker} stock chart "
+        "for publication-grade financial research.\n\n"
+        "Evaluate on these dimensions:\n"
+        "1. Communication — does it clearly answer the price/volume trend question?\n"
+        "2. Clarity — are axes, ticks, legends, and title present and accurate?\n"
+        "3. Aesthetics — are colors professional and series clearly distinguished?\n"
+        "4. Core improvements (max 2) — give concrete, specific fixes with rationale.\n"
+        "5. Verdict — state what still needs fixing. Do NOT say FINISH yet.\n\n"
+        "Plain text only. Be specific and actionable."
     )
-
 
 def prompt_iter2(ticker: str, prev_code: str, critique: str) -> str:
     return (
@@ -348,15 +350,15 @@ def prompt_iter2(ticker: str, prev_code: str, critique: str) -> str:
 
 def prompt_critique_2(ticker: str) -> str:
     return (
-        f"You are a VLM re-evaluating an improved {ticker} stock chart.\n\n"
-        "First briefly note 1-2 clear improvements from the previous version.\n"
-        "Then identify 1-2 remaining gaps with ⚠️ that would prevent this "
-        "from being published in a professional equity research report.\n\n"
-        "Total response: 2-4 sentences. Plain text only."
+        f"You are re-evaluating an improved {ticker} stock chart for publication.\n\n"
+        "1. Note what improved from the previous version.\n"
+        "2. Identify 1-2 remaining gaps with ⚠️.\n"
+        "3. Verdict — if still not publication-ready, state the remaining fix. "
+        "Do NOT say FINISH yet.\n\n"
+        "2-4 sentences. Plain text only."
     )
 
-
-def prompt_iter3(ticker: str, prev_code: str, critique: str) -> str:
+def prompt_iter3(ticker: str, prev_code: str, critique: str, df: pd.DataFrame) -> str:
     return (
         f"{CHART_CODE_SYSTEM}\n\n"
         f"Create a PROFESSIONAL, publication-ready {ticker} stock chart.\n\n"
@@ -371,30 +373,30 @@ def prompt_iter3(ticker: str, prev_code: str, critique: str) -> str:
         "- MA5 line: ax1.plot(df['date_str'], df['ma5'], color='#f59e0b', linewidth=2, linestyle='--', label='MA5')\n"
         "- Volume bars: ax2.bar(df['date_str'], df['volume_m'], color='#94a3b8', alpha=0.3, label='Volume (M)')\n"
         "- Grid: ax1.grid(True, color='#e0e0e0', alpha=0.7, linestyle='--', linewidth=0.5)\n"
-        "- Title: ax1.set_title(f'{ticker} Weekly Price Analysis', fontsize=14, fontweight='bold')\n"
+        f"- Title: ax1.set_title('{ticker} Weekly Price Analysis ({df['date_str'].iloc[0]} to {df['date_str'].iloc[-1]})', fontsize=14, fontweight='bold')\n"
         "- Axis labels: ax1.set_ylabel('Price (USD)', fontsize=11) and ax2.set_ylabel('Volume (M)', fontsize=11)\n"
         "- Legend (use exactly this pattern):\n"
         "    handles1, labels1 = ax1.get_legend_handles_labels()\n"
         "    handles2, labels2 = ax2.get_legend_handles_labels()\n"
         "    ax1.legend(handles1 + handles2, labels1 + labels2, loc='upper left', fontsize=9, framealpha=0.9)\n"
-        "- Ticks: plt.xticks(rotation=30, fontsize=9)\n"
-        "IMPORTANT: fill_between does NOT accept fillalpha — use alpha only."
+        "- Ticks: show only every 5th label to avoid crowding:\n"
+        "    tick_positions = range(0, len(df), 5)\n"
+        "    ax1.set_xticks(list(tick_positions))\n"
+        "    ax1.set_xticklabels([df['date_str'].iloc[i] for i in tick_positions], rotation=30, fontsize=9)\n"        "IMPORTANT: fill_between does NOT accept fillalpha — use alpha only."
     )
 
 
 def prompt_final_review(ticker: str) -> str:
     return (
-        f"You are a senior equity research analyst giving final approval on a "
-        f"{ticker} stock chart for client publication.\n\n"
-        "Review against professional equity research standards:\n"
-        "- Does it show price, volume, and a trend indicator (MA)?\n"
-        "- Are all axes, labels, and legend clear and properly formatted?\n"
-        "- Is the visual quality appropriate for a professional PDF report?\n\n"
-        "If it meets the standard start with: '✅ APPROVED —' then one sentence why.\n"
-        "If not start with: '⚠️ NEEDS REVISION —' and one specific fix needed.\n"
-        "Total: 1-2 sentences only. Plain text."
+        f"You are a top-tier visualization critic giving final sign-off on a "
+        f"{ticker} stock chart for a professional research report.\n\n"
+        "Evaluate: communication clarity, axis/legend completeness, "
+        "color professionalism, layout balance.\n\n"
+        "If it meets publication-grade standards output exactly: "
+        "'✅ APPROVED — ' followed by one sentence why.\n"
+        "If not output: '⚠️ NEEDS REVISION — ' and one specific fix.\n"
+        "1-2 sentences only."
     )
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPERS
@@ -508,8 +510,8 @@ def run(ticker: str, mock: bool = False, days: int = 90) -> dict:
 
     # ── 6. Iteration 3 — Professional ─────────────────────────────────────────
     print("[ 6 / 7 ]  Iteration 3: Creating publication-ready chart (LLM — Cortex)...")
-    code3 = MOCK_CODE_ITER3 if mock else llm_complete(
-        session, "llama3.1-70b", prompt_iter3(ticker, code2, critique2)
+    code3 = llm_complete(
+        session, "llama3.1-70b", prompt_iter3(ticker, code2, critique2, df)
     )
     path3 = str(run_dir / "iter3_professional.png")
     execute_chart_code(code3, df, path3)

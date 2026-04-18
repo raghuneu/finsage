@@ -4,28 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FinSage is an AI-powered financial research report generation system for U.S. public companies. It automates data collection, analysis, and generation of 15-20 page PDF research reports with visualizations and citations. Built for DAMG 7374 (Northeastern University).
+FinSage is an AI-powered financial research report generator for U.S. public companies. It automates data collection, analysis, and generation of 15-20 page PDF research reports with visualizations and citations. Built for DAMG 7374 (Northeastern University).
 
-The system combines a Snowflake data warehouse with AWS Bedrock AI services and Snowflake Cortex LLM/VLM capabilities to deliver end-to-end financial intelligence — from raw data ingestion through multi-agent report generation and interactive Q&A.
+The system combines a Snowflake data warehouse with AWS Bedrock AI services and Snowflake Cortex LLM/VLM capabilities to deliver end-to-end financial intelligence — from raw data ingestion through multi-agent report generation, evaluation, and interactive Q&A.
+
+## Environment Setup
+
+```bash
+py -m venv venv
+venv\Scripts\activate          # PowerShell: venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pip install matplotlib snowflake-ml-python  # needed for POCs/
+```
+
+Credentials go in `.env` (not committed): Snowflake account/user/password/warehouse/database/role, NewsAPI key, AWS credentials, Bedrock KB/Guardrail IDs.
 
 ## Key Commands
 
-### Environment Setup
-```bash
-source venv/bin/activate
-pip install -r requirements.txt          # core deps
-pip install -r requirements_2.txt        # includes Airflow + dbt
-```
-
 ### Data Pipeline
 ```bash
-# Modular pipeline (preferred)
 python -c "from src.orchestration.data_pipeline import run_pipeline; run_pipeline()"
 
-# Individual loaders (legacy scripts/)
+# Legacy individual loaders
 python scripts/load_sample_stock_data.py
 python scripts/load_sample_fundamentals.py
-python scripts/load_sample_news.py
 python scripts/load_sec_data.py
 ```
 
@@ -34,20 +36,46 @@ python scripts/load_sec_data.py
 cd dbt_finsage
 dbt debug                        # verify Snowflake connection
 dbt run                          # run all models
-dbt test                         # data quality tests
 dbt run --select staging         # run only staging layer
 dbt run --select analytics       # run only analytics layer
+dbt test                         # data quality tests
+dbt run --select analytics.fct_stock_metrics  # single model
 ```
 
-### Report Generation (Multi-Agent Pipeline)
+### Report Generation (CAVM Pipeline)
 ```bash
+python agents/orchestrator.py --ticker AAPL
 python agents/orchestrator.py --ticker AAPL --debug
+python agents/orchestrator.py --ticker AAPL --skip-charts   # reuse last charts (fast)
 python agents/orchestrator.py --ticker AAPL --skip-charts --charts-dir outputs/AAPL_20260404_104147
 ```
 
-### Streamlit Frontend
+### Report Evaluation
 ```bash
-streamlit run app.py
+python evaluator/cli.py outputs/AAPL_20260416_143000          # full LLM scoring (needs Snowflake)
+python evaluator/cli.py outputs/AAPL_20260416_143000 --no-llm  # rule-based only
+python evaluator/cli.py --latest                               # auto-select newest output
+```
+
+### React Frontend + FastAPI
+```bash
+cd frontend-react
+npm install
+npm run dev                   # Next.js dev server → http://localhost:3000
+
+# FastAPI backend (separate terminal)
+cd frontend-react/api
+pip install -r requirements.txt
+uvicorn main:app --reload     # → http://localhost:8000
+```
+
+### Tests
+```bash
+pytest                                    # run all tests
+pytest tests/test_evaluator.py -v        # evaluator tests (no Snowflake needed)
+pytest tests/test_data_loaders.py        # data loader tests
+pytest --cov=src --cov=agents --cov-report=term-missing  # with coverage
+pytest -k "test_validate"               # filter by name
 ```
 
 ### Airflow (Docker Compose)
@@ -60,205 +88,106 @@ docker-compose up airflow-worker
 
 ### SEC Filing Analysis (Bedrock)
 ```bash
-# Multi-model comparison CLI
 python scripts/sec_filings/multi_model.py
 ```
 
 ## Architecture
 
-### Data Flow: Three-Layer Snowflake Architecture
+### Data Flow: Three-Layer Snowflake Pipeline
 
 **RAW** (ingestion) → **STAGING** (cleaning, dbt views) → **ANALYTICS** (fact/dimension tables, dbt tables)
 
-- Data sources: Yahoo Finance (stock prices), Alpha Vantage (fundamentals), NewsAPI (articles), SEC EDGAR (10-K/10-Q filings)
-- Loading uses idempotent MERGE statements with temporary staging tables
+- Data sources: Yahoo Finance (stock prices), Alpha Vantage (fundamentals), NewsAPI (articles), SEC EDGAR (10-K/10-Q)
+- Loading uses idempotent MERGE statements via temp staging tables
 - Every table has `source` and `ingested_at` columns for lineage
-- `data_quality_score` (0-100) computed pre-load with deductions for missing/invalid fields
-- Incremental loading: queries only data since `get_last_loaded_date()`
+- `data_quality_score` (0–100) computed pre-load; incremental loading via `get_last_loaded_date()`
+- Warehouse schema quick reference: `.astro/warehouse.md` — always check column names here before writing SQL
 
-### Multi-Agent Report Generation (CAVM Pipeline)
+### Multi-Agent CAVM Report Pipeline
 
-`agents/orchestrator.py` coordinates four agents in sequence:
+`agents/orchestrator.py` coordinates four stages, tracked by `RunContext` + `PipelineTracker` (observability):
 
-1. **Chart Agent** (`chart_agent.py`) — Queries ANALYTICS layer, generates 6 matplotlib charts per ticker, uses 3-iteration VLM refinement loop (Snowflake Cortex claude-sonnet-4-6: initial → critique → refined → final)
-2. **Validation Agent** (`validation_agent.py`) — Validates chart visual quality and data integrity, flags failures for re-generation
-3. **Analysis Agent** (`analysis_agent.py`) — Per-chart LLM analysis via Snowflake Cortex (mistral-large), plus SEC MD&A/Risk Factors summarization via Cortex SUMMARIZE
-4. **Report Agent** (`report_agent.py`) — Assembles branded PDF with reportlab (Midnight Teal color scheme: #0f2027 header, #00b4d8 accent, #06d6a0 bullish, #ef476f bearish)
+1. **Chart Agent** (`chart_agent.py`) — Queries ANALYTICS layer, generates 8 matplotlib charts, 3-iteration VLM refinement loop via Snowflake Cortex
+2. **Validation Agent** (`validation_agent.py`) — Rule checks (file, size, dimensions, plausibility) + VLM score per chart; one re-render attempt on failure
+3. **Analysis Agent** (`analysis_agent.py`) — Per-chart LLM analysis via Cortex (claude-opus-4-6), SEC MD&A/Risk summarization, company overview, peer comparison
+4. **Report Agent** (`report_agent.py`) — Branded PDF with reportlab (Midnight Teal palette)
 
-Agents share state via Snowflake ANALYTICS layer + filesystem (output directory per run).
+**Output directory** (`outputs/<TICKER>_<YYYYMMDD>_<HHMMSS>/`):
+- 8 chart PNGs + `chart_manifest.json` (VLM scores, data_summary per chart)
+- `pipeline_result.json` — run summary (ticker, elapsed, pdf_path, charts_summary)
+- `analysis_result.json` — full LLM text (chart analyses, investment thesis, section texts) — used by evaluator
+- Final branded PDF
+
+### Report Evaluation System (`evaluator/`)
+
+Post-pipeline quality gate. Reads `pipeline_result.json`, `analysis_result.json`, `chart_manifest.json`.
+
+Five dimensions (weighted):
+- **completeness** (20%) — all artifacts, texts, PDF present
+- **data_quality** (20%) — financial bounds, no NaN/None in critical fields
+- **text_quality** (35%) — rule-based (word count, no markdown, numeric density) + optional Cortex LLM scoring
+- **chart_quality** (15%) — aggregates VLM scores from `chart_manifest.json`
+- **consistency** (10%) — key figures cited in text, signal tone matches data
+
+Verdicts: `GOLDEN` (90+) → `PUBLICATION_READY` (75+) → `NEEDS_REVISION` (50+) → `REJECTED`
+
+Output: `eval_report_card.json` in the output directory + colour-coded terminal table.
 
 ### SEC Filing Processing (`scripts/sec_filings/`)
 
-End-to-end SEC filing pipeline with AWS Bedrock integration:
+- `filing_downloader.py` — Downloads 10-K/10-Q from SEC EDGAR
+- `s3_utils.py` — S3 storage (`finsage-sec-filings-808683`): `filings/raw/{ticker}/{form_type}/`
+- `bedrock_kb.py` — Bedrock Knowledge Base RAG (vector search + citations)
+- `guardrails.py` — Bedrock Guardrails (blocks investment advice, redacts PII, contextual grounding)
+- `multi_model.py` — Parallel multi-model comparison (Llama3, Titan, Mistral, Claude) with consensus
 
-- **`filing_downloader.py`** — Downloads 10-K/10-Q filings from SEC EDGAR
-- **`text_extractor.py`** — Extracts text from PDF/HTML filing documents
-- **`s3_utils.py`** — Manages S3 storage for filings (bucket: `finsage-sec-filings-808683`)
-  - Layout: `filings/raw/{ticker}/{form_type}/`, `filings/extracted/{ticker}/{form_type}/`
-- **`bedrock_kb.py`** — Bedrock Knowledge Base RAG client
-  - `retrieve()` — Vector search over SEC filing embeddings
-  - `ask()` — Retrieval-augmented generation with citations (Llama 3 models)
-  - `cross_ticker_analysis()` — Comparative analysis across companies
-- **`guardrails.py`** — Bedrock Guardrails for content safety
-  - Blocks investment advice (denied topics), redacts PII, detects hallucinations via contextual grounding
-  - `generate()` — LLM generation with guardrails applied
-  - `check_output()` — Validate text without a model call
-- **`multi_model.py`** — Multi-model comparison via Bedrock (Llama3, Titan, Mistral, Claude)
-  - `compare()` — Parallel inference with latency tracking
-  - `consensus()` — Synthesizes agreement/disagreement across models
-- **`document_agent.py`** — SEC document analysis agent integrating Snowflake analytics context
+### Observability (`src/utils/observability.py`)
 
-### Data Loaders (`src/data_loaders/`)
+Every pipeline run creates a `RunContext` (auto-generates `run_id`) and a `PipelineTracker` that writes stage timing and status to:
+- `ANALYTICS.FCT_PIPELINE_RUNS`
+- `ANALYTICS.FCT_LLM_CALLS`
+- `ANALYTICS.FCT_DATA_QUALITY_HISTORY`
+- `ANALYTICS.FCT_HEALTH_CHECKS`
 
-All loaders extend `base_loader.py` (abstract `BaseDataLoader` with template methods: `fetch_data`, `validate_data`, `calculate_quality_score`, `load`). The `src/orchestration/data_pipeline.py` orchestrates all loaders.
+The `run_id` is also appended to `pipeline_result.json` after the pipeline completes.
 
-### Streamlit Frontend (`app.py`)
+### React Frontend (`frontend-react/`)
 
-Full-featured interactive UI with 10 pages:
+Next.js 15 + MUI + FastAPI backend (`frontend-react/api/`). Replaces the old Streamlit frontend.
 
-1. **Dashboard** — Real-time company metrics (market cap, price, revenue, sentiment, P/E)
-2. **Data Pipeline** — Snowflake layer status, S3 filing counts, pipeline execution
-3. **Analytics Explorer** — Stock metrics, fundamentals, sentiment, SEC financials with charts
-4. **SEC Filing Analysis** — Filing listing, document-level analysis (summary, risks, MD&A comparison)
-5. **RAG Search** — Ask questions, cross-ticker analysis, raw chunk retrieval from Bedrock KB
-6. **Research Report** — Full 7-section report generation
-7. **Multi-Model Analysis** — Side-by-side model comparison with consensus synthesis
-8. **Guardrails Demo** — Interactive guardrail testing with preset examples
-9. **Ask FinSage** — Dual-source Q&A (Snowflake Cortex vs. Bedrock KB)
-10. **System Status** — Health checks for Snowflake, AWS, Bedrock KB, Guardrails, Multi-Model
+Pages: Dashboard, Analytics, SEC Filing Analysis, RAG Search, Report Generation, Ask FinSage, Observability.
 
-### Airflow DAG (`airflow/dags/data_collection_dag.py`)
-
-Scheduled daily at 5 PM EST. Tasks: 4 parallel data fetches → `run_dbt_transformations` → `data_quality_check`. Uses CeleryExecutor with Redis broker and PostgreSQL metadata DB.
+API routes live in `frontend-react/api/routers/` — one file per domain (dashboard, analytics, sec, report, chat, pipeline, observability).
 
 ### dbt Project (`dbt_finsage/`)
 
-- Profile: `dbt_finsage` (Snowflake connection via `~/.dbt/profiles.yml`)
-- Staging models (4): materialized as **views** in `staging` schema
-- Analytics models (5): materialized as **tables** in `analytics` schema — `dim_company`, `fct_stock_metrics`, `fct_fundamentals_growth`, `fct_news_sentiment_agg`, `fct_sec_financial_summary`
+- Profile: `dbt_finsage` (Snowflake via `~/.dbt/profiles.yml`)
+- Staging models (4): materialized as **views**
+- Analytics models (5): materialized as **tables** — `dim_company`, `fct_stock_metrics`, `fct_fundamentals_growth`, `fct_news_sentiment_agg`, `fct_sec_financial_summary`
+- Custom schema macro in `models/macros/generate_schema_name.sql` controls schema resolution — check before changing `dbt_project.yml`
 
 ## Tech Stack
 
-- **Python 3.9** with virtual environment (`venv/`)
-- **Snowflake** (SFEDU02 academic account) — warehouse, Cortex LLM/VLM (claude-sonnet-4-6, mistral-large), Cortex Search, Cortex SUMMARIZE
-- **AWS Bedrock** — Knowledge Base RAG (Llama 3), Guardrails (content safety/grounding), multi-model inference (Llama3, Titan, Mistral, Claude)
-- **AWS S3** — SEC filing document storage (`finsage-sec-filings-808683`)
-- **dbt 1.7** for SQL transformations
-- **Apache Airflow 2.8** for orchestration (Docker Compose stack)
-- **reportlab** for PDF generation, **matplotlib** for charts
-- **Streamlit** for interactive frontend (`app.py`, 10 pages)
-- **Terraform** for AWS S3 infrastructure (`terraform/s3/`)
-- **boto3** for AWS SDK interactions
-
-## Configuration
-
-- Credentials in `.env` (not committed): Snowflake creds, NewsAPI key, AWS credentials, Bedrock KB/Guardrail IDs
-- Tracked tickers defined in `config/tickers.yaml` (AAPL, MSFT, GOOGL)
-- Snowflake target: `FINSAGE_DB` database, `FINSAGE_WH` warehouse
-- SQL DDL migrations in `sql/` (numbered 01-07)
-
-## Project Structure
-
-```
-finsage-project/
-├── agents/                     # CAVM multi-agent report generation pipeline
-│   ├── orchestrator.py         # Coordinates chart → validation → analysis → report
-│   ├── chart_agent.py          # 6 matplotlib charts with VLM refinement loop
-│   ├── validation_agent.py     # Chart quality and data integrity checks
-│   ├── analysis_agent.py       # Per-chart LLM analysis + SEC summarization
-│   └── report_agent.py         # Branded PDF assembly with reportlab
-├── src/
-│   ├── data_loaders/           # Base loader + stock, fundamentals, news, SEC loaders
-│   ├── orchestration/          # data_pipeline.py — runs all loaders
-│   └── utils/                  # logger.py, snowflake_client.py
-├── scripts/
-│   ├── sec_filings/            # Bedrock KB RAG, Guardrails, multi-model, S3, document agent
-│   ├── load_sample_*.py        # Legacy individual data loaders
-│   ├── run_migration_*.py      # SQL DDL migration runners
-│   └── verify_*.py             # Data verification scripts
-├── dbt_finsage/                # dbt project (staging views + analytics tables)
-├── airflow/                    # Docker Compose Airflow stack + DAGs
-├── sql/                        # DDL migrations (01-07)
-├── terraform/s3/               # AWS S3 infrastructure as code
-├── config/tickers.yaml         # Tracked ticker symbols
-├── app.py                      # Streamlit frontend (10 pages)
-├── outputs/                    # Generated reports: <TICKER>_<YYYYMMDD>_<HHMMSS>/
-├── POCs/                       # Proof of concept scripts (Cortex, chart generation)
-└── requirements.txt / requirements_2.txt
-```
-
-## Output
-
-Generated reports go to `outputs/<TICKER>_<YYYYMMDD>_<HHMMSS>/` containing:
-- 6 chart PNGs (price_sma, eps_trend, revenue_growth, sentiment, volatility, financial_health)
-- Iterative VLM refinement artifacts (iter1_tmp.png, iter2_tmp.png)
-- `chart_manifest.json` — Chart metadata and file paths
-- `pipeline_result.json` — Full pipeline execution results
-- Final branded PDF report (15-20 pages)
-
-## Data Warehouse Quick Reference
-
-When querying the warehouse, use these table mappings:
-
-| Concept | Table | Key Column(s) | Date Column |
-|---------|-------|---------------|-------------|
-| Companies | FINSAGE_DB.ANALYTICS.DIM_COMPANY | TICKER | DBT_UPDATED_AT |
-| Stock prices (daily) | FINSAGE_DB.ANALYTICS.FCT_STOCK_METRICS | TICKER, DATE | DATE |
-| Fundamentals (quarterly) | FINSAGE_DB.ANALYTICS.FCT_FUNDAMENTALS_GROWTH | TICKER, FISCAL_QUARTER | DBT_UPDATED_AT |
-| News sentiment (daily) | FINSAGE_DB.ANALYTICS.FCT_NEWS_SENTIMENT_AGG | TICKER, NEWS_DATE | NEWS_DATE |
-| SEC financials (annual/quarterly) | FINSAGE_DB.ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY | TICKER, FISCAL_YEAR, FISCAL_PERIOD | PERIOD_END |
-| Raw stock prices | FINSAGE_DB.RAW.RAW_STOCK_PRICES | TICKER, DATE | DATE |
-| Raw fundamentals | FINSAGE_DB.RAW.RAW_FUNDAMENTALS | TICKER, FISCAL_QUARTER | INGESTED_AT |
-| Raw news articles | FINSAGE_DB.RAW.RAW_NEWS | ARTICLE_ID | PUBLISHED_AT |
-| Raw SEC XBRL filings | FINSAGE_DB.RAW.RAW_SEC_FILINGS | TICKER, CONCEPT, PERIOD_END, FISCAL_PERIOD | PERIOD_END |
-| Raw SEC filing documents | FINSAGE_DB.RAW.RAW_SEC_FILING_DOCUMENTS | FILING_ID | FILING_DATE |
-| Raw SEC filing text | FINSAGE_DB.RAW.RAW_SEC_FILING_TEXT | TICKER, ACCESSION_NUMBER | FILING_DATE |
-
-**Tracked tickers:** AAPL, GOOGL, JPM, MSFT, TSLA
-
-**Categorical signals:**
-- `TREND_SIGNAL`: BULLISH, BEARISH, NEUTRAL
-- `FUNDAMENTAL_SIGNAL`: STRONG_GROWTH, MODERATE_GROWTH, DECLINING, MIXED
-- `SENTIMENT_LABEL`: BULLISH, BEARISH, NEUTRAL, NO_COVERAGE
-- `FINANCIAL_HEALTH`: EXCELLENT, HEALTHY, FAIR, UNPROFITABLE
-
-> Auto-generated by `/data:init` on 2026-04-14. Run `/data:init --refresh` to update.
+- **Python 3.12** — backend, agents, data loaders
+- **Snowflake** (`FINSAGE_DB`, `FINSAGE_WH`) — data warehouse, Cortex LLM/VLM (claude-opus-4-6, mistral-large), Cortex SUMMARIZE
+- **AWS Bedrock** — Knowledge Base RAG, Guardrails, multi-model inference
+- **AWS S3** — SEC filing document storage
+- **dbt 1.7** — SQL transformations
+- **Apache Airflow 2.8** — Docker Compose orchestration (daily 5 PM EST)
+- **Next.js 15 + MUI** — React frontend
+- **FastAPI** — API backend for React frontend
+- **reportlab + matplotlib** — PDF and chart generation
+- **Terraform** — AWS S3 infrastructure (`terraform/s3/`)
 
 ## Development Workflow
 
-This project follows the Everything Claude Code (ECC) development methodology. Detailed rules are in `.claude/rules/`.
+Rules are in `.claude/rules/` (coding style, testing, git workflow, security, performance, agents) and `.cortex/rules/`.
 
-### Workflow Sequence
+- **Before writing SQL**: verify column names against `.astro/warehouse.md`
+- **Commit style**: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
+- **Before commit**: `pytest` passes, `dbt compile` succeeds if dbt models changed, no hardcoded secrets
 
-1. **Research & Reuse** — Check existing code before writing new code. Search `src/`, `agents/`, `scripts/` for similar patterns.
-2. **Plan First** — For complex features, create an implementation plan before coding. Break into small, testable steps.
-3. **TDD** — Write tests first (RED), implement (GREEN), refactor (IMPROVE). Use `pytest`.
-4. **Code Review** — After writing code, review for security, quality, and correctness. Check SQL column names against `.astro/warehouse.md`.
-5. **Commit** — Use conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
-
-### Custom Commands
-
-- `/pipeline-debug` — Debug CAVM pipeline failures (connection, data, column names, stage tracing)
-- `/dbt-validate` — Run dbt debug → compile → run → test → verify downstream consumers
-- `/data-quality` — Cross-layer data quality checks (RAW → STAGING → ANALYTICS consistency)
-
-## Code Quality Standards
-
-### Size Limits
-- Functions: < 50 lines
-- Files: < 800 lines
-- Nesting: < 4 levels deep
-
-### Mandatory Practices
-- Type annotations on all function signatures
-- Specific exception handling (no bare `except:`)
-- Meaningful error messages with context (ticker, stage, function)
-- No hardcoded secrets — use `.env` + `python-dotenv`
-- No `print()` for debugging — use `src/utils/logger.py`
-
-### Before Every Commit
-- [ ] `pytest` passes
-- [ ] `cd dbt_finsage && dbt compile` succeeds (if dbt models changed)
-- [ ] No hardcoded secrets or `.env` files staged
-- [ ] SQL column names verified against `.astro/warehouse.md`
-- [ ] No `print()` debug statements in production code
+### Custom Commands (`.claude/commands/`)
+- `/pipeline-debug` — Debug CAVM pipeline failures (connection, data, column names)
+- `/dbt-validate` — Run dbt debug → compile → run → test → verify downstream
+- `/data-quality` — Cross-layer data quality checks (RAW → STAGING → ANALYTICS)
