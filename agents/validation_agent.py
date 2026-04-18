@@ -111,12 +111,12 @@ def check_data_plausibility(chart: dict) -> tuple:
             except (ValueError, TypeError):
                 pass
 
-    # Debt-to-equity: extremely high values (> 50) are suspicious
+    # Debt-to-equity: values > 10 are suspicious (but not blocking — see hard check below)
     for key in ("debt_to_equity_ratio", "debt_to_equity"):
         val = summary.get(key)
         if val is not None:
             try:
-                if float(val) > 50:
+                if float(val) > 10:
                     warnings.append(f"{key}={float(val):.1f} is unusually high")
             except (ValueError, TypeError):
                 pass
@@ -124,6 +124,30 @@ def check_data_plausibility(chart: dict) -> tuple:
     if warnings:
         return False, "Data plausibility warnings: " + "; ".join(warnings)
     return True, "Data plausibility OK"
+
+
+def check_extreme_values(chart: dict) -> tuple:
+    """
+    Hard check for extreme values that are almost certainly data errors
+    (e.g., D/E > 50 from unscaled Yahoo Finance data).
+    """
+    summary = chart.get("data_summary", {})
+    if not summary:
+        return True, "No data_summary to validate"
+
+    errors = []
+    for key in ("debt_to_equity_ratio", "debt_to_equity"):
+        val = summary.get(key)
+        if val is not None:
+            try:
+                if float(val) > 50:
+                    errors.append(f"{key}={float(val):.1f} exceeds 50 — likely unscaled data error")
+            except (ValueError, TypeError):
+                pass
+
+    if errors:
+        return False, "Extreme value errors: " + "; ".join(errors)
+    return True, "Extreme value check OK"
 
 
 def run_rule_checks(chart: dict) -> list:
@@ -136,6 +160,7 @@ def run_rule_checks(chart: dict) -> list:
         ("dimensions",         check_image_dimensions),
         ("data_summary",       check_data_summary_populated),
         ("data_plausibility",  check_data_plausibility),
+        ("extreme_values",     check_extreme_values),
     ]
 
     results = []

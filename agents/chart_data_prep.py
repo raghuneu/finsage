@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 DATA_PREP_VERSION = "1.0.0"
 
 
+def _safe_round_list(series: pd.Series, decimals: int = 1) -> list:
+    """Round non-null values and preserve None for NaN entries."""
+    return [round(float(v), decimals) if pd.notna(v) else None for v in series]
+
+
 def prepare_price_sma_data(df: pd.DataFrame) -> dict[str, Any]:
     """Prepare data for price_sma chart.
 
@@ -86,8 +91,8 @@ def prepare_revenue_growth_data(df: pd.DataFrame) -> dict[str, Any]:
 
     return {
         "fiscal_quarter": df["fiscal_quarter"].tolist(),
-        "revenue_growth_yoy_pct": df["revenue_growth_yoy_pct"].fillna(0).round(1).tolist(),
-        "net_income_growth_yoy_pct": df["net_income_growth_yoy_pct"].fillna(0).round(1).tolist(),
+        "revenue_growth_yoy_pct": _safe_round_list(df["revenue_growth_yoy_pct"], 1),
+        "net_income_growth_yoy_pct": _safe_round_list(df["net_income_growth_yoy_pct"], 1),
         "y_label": "Growth (YoY %)",
         "x_label": "Fiscal Quarter",
         "num_points": len(df),
@@ -106,8 +111,8 @@ def prepare_eps_trend_data(df: pd.DataFrame) -> dict[str, Any]:
 
     return {
         "fiscal_quarter": df["fiscal_quarter"].tolist(),
-        "eps": df["eps"].fillna(0).round(2).tolist(),
-        "eps_growth_yoy_pct": df["eps_growth_yoy_pct"].fillna(0).round(1).tolist(),
+        "eps": _safe_round_list(df["eps"], 2),
+        "eps_growth_yoy_pct": _safe_round_list(df["eps_growth_yoy_pct"], 1),
         "y_left_label": "EPS (USD)",
         "y_right_label": "EPS Growth YoY %",
         "x_label": "Fiscal Quarter",
@@ -128,8 +133,8 @@ def prepare_sentiment_data(df: pd.DataFrame) -> dict[str, Any]:
 
     return {
         "news_date": df["news_date"].dt.strftime("%Y-%m-%d").tolist(),
-        "sentiment_score": df["sentiment_score"].fillna(0).round(3).tolist(),
-        "sentiment_score_7d_avg": df["sentiment_score_7d_avg"].fillna(0).round(3).tolist(),
+        "sentiment_score": _safe_round_list(df["sentiment_score"], 3),
+        "sentiment_score_7d_avg": _safe_round_list(df["sentiment_score_7d_avg"], 3),
         "y_label": "Sentiment Score (-1 to +1)",
         "x_label": "Date",
         "y_min": -1.0,
@@ -151,9 +156,9 @@ def prepare_financial_health_data(df: pd.DataFrame) -> dict[str, Any]:
 
     return {
         "fiscal_period": df["fiscal_period"].tolist(),
-        "net_margin_pct": df["net_margin_pct"].fillna(0).round(1).tolist(),
-        "operating_margin_pct": df["operating_margin_pct"].fillna(0).round(1).tolist(),
-        "debt_to_equity_ratio": df["debt_to_equity_ratio"].fillna(0).round(2).tolist(),
+        "net_margin_pct": _safe_round_list(df["net_margin_pct"], 1),
+        "operating_margin_pct": _safe_round_list(df["operating_margin_pct"], 1),
+        "debt_to_equity_ratio": _safe_round_list(df["debt_to_equity_ratio"], 2),
         "y_left_label": "Margin %",
         "y_right_label": "Debt/Equity Ratio",
         "x_label": "Fiscal Period",
@@ -175,19 +180,18 @@ def prepare_margin_trend_data(df: pd.DataFrame) -> dict[str, Any]:
     # Determine if margins are in decimal (0-1) or percentage form
     # If column names end with _pct, they're already percentages
     if "net_margin_pct" in df.columns:
-        net_margin_pct = df["net_margin_pct"].fillna(0).round(1)
+        net_margin_pct = pd.to_numeric(df["net_margin_pct"], errors="coerce").round(1)
     elif "net_margin" in df.columns:
-        # Convert decimal to percentage here — NOT in LLM
-        net_margin_pct = (df["net_margin"].fillna(0) * 100).round(1)
+        net_margin_pct = (pd.to_numeric(df["net_margin"], errors="coerce") * 100).round(1)
     else:
-        net_margin_pct = pd.Series([0.0] * len(df))
+        net_margin_pct = pd.Series([None] * len(df))
 
     if "operating_margin_pct" in df.columns:
-        op_margin_pct = df["operating_margin_pct"].fillna(0).round(1)
+        op_margin_pct = pd.to_numeric(df["operating_margin_pct"], errors="coerce").round(1)
     elif "operating_margin" in df.columns:
-        op_margin_pct = (df["operating_margin"].fillna(0) * 100).round(1)
+        op_margin_pct = (pd.to_numeric(df["operating_margin"], errors="coerce") * 100).round(1)
     else:
-        op_margin_pct = pd.Series([0.0] * len(df))
+        op_margin_pct = pd.Series([None] * len(df))
 
     return {
         "fiscal_period": df["fiscal_period"].tolist(),
@@ -210,15 +214,15 @@ def prepare_balance_sheet_data(df: pd.DataFrame) -> dict[str, Any]:
     df = _sort_by_fiscal_period(df)
 
     # Pre-compute billions — LLM must NOT divide by 1e9
-    assets_b = (df["total_assets"].fillna(0) / 1e9).round(1)
-    liabilities_b = (df["total_liabilities"].fillna(0) / 1e9).round(1)
-    equity_b = (df["stockholders_equity"].fillna(0) / 1e9).round(1)
+    assets_b = _safe_round_list(df["total_assets"] / 1e9, 1)
+    liabilities_b = _safe_round_list(df["total_liabilities"] / 1e9, 1)
+    equity_b = _safe_round_list(df["stockholders_equity"] / 1e9, 1)
 
     return {
         "fiscal_period": df["fiscal_period"].tolist(),
-        "total_assets_billions": assets_b.tolist(),
-        "total_liabilities_billions": liabilities_b.tolist(),
-        "stockholders_equity_billions": equity_b.tolist(),
+        "total_assets_billions": assets_b,
+        "total_liabilities_billions": liabilities_b,
+        "stockholders_equity_billions": equity_b,
         "y_label": "Amount ($B)",
         "x_label": "Fiscal Period",
         "num_points": len(df),
