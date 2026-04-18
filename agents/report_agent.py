@@ -1457,7 +1457,7 @@ def build_peer_comparison(ticker: str, analysis: dict, styles: dict) -> list:
     return elements
 
 
-def build_risk_section(risk_summary: str, charts: list, styles: dict) -> list:
+def build_risk_section(risk_summary: str, charts: list, styles: dict, analysis: dict = None) -> list:
     """Build expanded risk factors page with categorized risks."""
     elements = []
     elements.append(Paragraph("6. Risk Factors", styles["page_title"]))
@@ -1524,7 +1524,7 @@ def build_risk_section(risk_summary: str, charts: list, styles: dict) -> list:
     dte = fin_data.get("debt_to_equity_ratio")
     margin = fin_data.get("net_margin_pct")
     # Fall back to analysis company_overview if chart data is missing
-    if margin is None:
+    if margin is None and analysis:
         co_facts = analysis.get("company_overview", {}).get("key_facts", {})
         margin = co_facts.get("net_margin") or co_facts.get("profit_margin")
         # Normalize decimal (0.27) to percentage (27.0)
@@ -2131,7 +2131,8 @@ def build_pdf(
         elems += build_risk_section(
             analysis.get("risk_summary", "Risk factors not available."),
             charts,
-            styles
+            styles,
+            analysis=analysis
         )
 
         # Investment Recommendation

@@ -180,16 +180,16 @@ def prepare_margin_trend_data(df: pd.DataFrame) -> dict[str, Any]:
     # Determine if margins are in decimal (0-1) or percentage form
     # If column names end with _pct, they're already percentages
     if "net_margin_pct" in df.columns:
-        net_margin_pct = df["net_margin_pct"].where(pd.notna(df["net_margin_pct"])).round(1)
+        net_margin_pct = pd.to_numeric(df["net_margin_pct"], errors="coerce").round(1)
     elif "net_margin" in df.columns:
-        net_margin_pct = (df["net_margin"].where(pd.notna(df["net_margin"])) * 100).round(1)
+        net_margin_pct = (pd.to_numeric(df["net_margin"], errors="coerce") * 100).round(1)
     else:
         net_margin_pct = pd.Series([None] * len(df))
 
     if "operating_margin_pct" in df.columns:
-        op_margin_pct = df["operating_margin_pct"].where(pd.notna(df["operating_margin_pct"])).round(1)
+        op_margin_pct = pd.to_numeric(df["operating_margin_pct"], errors="coerce").round(1)
     elif "operating_margin" in df.columns:
-        op_margin_pct = (df["operating_margin"].where(pd.notna(df["operating_margin"])) * 100).round(1)
+        op_margin_pct = (pd.to_numeric(df["operating_margin"], errors="coerce") * 100).round(1)
     else:
         op_margin_pct = pd.Series([None] * len(df))
 
