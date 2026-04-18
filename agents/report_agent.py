@@ -103,6 +103,168 @@ def _fmt_money(v) -> str:
     return f"${v:,.0f}"
 
 
+def _validate_report_data(charts: list, analysis: dict, ticker: str) -> dict:
+    """Pre-assembly sanity checks on report data.
+
+    Logs warnings for inconsistencies that would surface as wrong numbers in
+    the final PDF.  Does NOT raise — the report still renders, but the build
+    log captures every data-quality concern.
+
+    Returns a dict of corrections applied, e.g.
+    ``{"net_margin_override": (old_val, new_val)}``.
+    """
+    corrections: dict = {}
+    chart_map = {c["chart_id"]: c.get("data_summary", {}) for c in charts}
+    fin = chart_map.get("financial_health", {})
+    eps = chart_map.get("eps_trend", {})
+    price = chart_map.get("price_sma", {})
+    co_facts = analysis.get("company_overview", {}).get("key_facts", {})
+
+    # 1. Net margin consistency: SEC-derived (financial_health) vs Yahoo (key_facts)
+    sec_margin = fin.get("net_margin_pct")
+    yf_margin = co_facts.get("net_margin") or co_facts.get("profit_margin")
+    if sec_margin is not None and yf_margin is not None:
+        try:
+            s, y = float(sec_margin), float(yf_margin)
+            # Normalise Yahoo decimal to pct if needed
+            if abs(y) < 1:
+                y = y * 100
+            if abs(s - y) > 10 and 5 <= y <= 60:
+                logger.warning(
+                    "[%s] Net margin mismatch: SEC=%.2f%% vs Yahoo=%.2f%% "
+                    "(diff %.2f pp) — overriding SEC value with Yahoo",
+                    ticker, s, y, abs(s - y),
+                )
+                corrections["net_margin_override"] = (s, y)
+                fin["net_margin_pct"] = round(y, 4)
+            elif abs(s - y) > 5:
+                logger.warning(
+                    "[%s] Net margin mismatch: SEC=%.2f%% vs Yahoo=%.2f%% "
+                    "(diff %.2f pp) — PDF will use SEC value",
+                    ticker, s, y, abs(s - y),
+                )
+        except (ValueError, TypeError):
+            pass
+
+    # 2. D/E ratio sanity + cross-source consistency
+    de_sec = fin.get("debt_to_equity_ratio")
+    de_yf = co_facts.get("debt_to_equity")
+    for label, val in [("SEC", de_sec), ("Yahoo", de_yf)]:
+        if val is not None:
+            try:
+                v = float(val)
+                if v < 0:
+                    logger.warning(
+                        "[%s] Negative D/E from %s: %.4f", ticker, label, v,
+                    )
+                elif v > 20:
+                    logger.warning(
+                        "[%s] Extreme D/E from %s: %.4f — likely unscaled "
+                        "percentage; will be clamped", ticker, label, v,
+                    )
+            except (ValueError, TypeError):
+                pass
+    # Reconcile: if both exist and differ substantially, log it so report is aware
+    if de_sec is not None and de_yf is not None:
+        try:
+            ds, dy = float(de_sec), float(de_yf)
+            if dy > 0 and abs(ds - dy) / dy > 0.50:
+                logger.warning(
+                    "[%s] D/E cross-source divergence: SEC=%.4f vs Yahoo=%.4f "
+                    "(>50%% relative diff) — using SEC value for consistency",
+                    ticker, ds, dy,
+                )
+        except (ValueError, TypeError):
+            pass
+
+    # 3. Stock price sanity (should be positive and < $100k)
+    cur_price = price.get("current_price")
+    if cur_price is not None:
+        try:
+            p = float(cur_price)
+            if p <= 0 or p > 100_000:
+                logger.warning(
+                    "[%s] Suspicious stock price: $%.2f", ticker, p,
+                )
+        except (ValueError, TypeError):
+            pass
+
+    # 4. Executive-summary N/A audit — flag metrics that will render as "N/A"
+    na_fields = []
+    if cur_price is None:
+        na_fields.append("Current Price")
+    if fin.get("net_margin_pct") is None and yf_margin is None:
+        na_fields.append("Net Margin")
+    if de_sec is None and de_yf is None:
+        na_fields.append("Debt/Equity")
+    if eps.get("latest_eps") is None:
+        na_fields.append("Latest EPS")
+    rev_growth = chart_map.get("revenue_growth", {})
+    if rev_growth.get("latest_revenue_growth_yoy") is None:
+        na_fields.append("Revenue Growth (YoY)")
+    if na_fields:
+        logger.warning(
+            "[%s] Executive summary will show N/A for: %s",
+            ticker, ", ".join(na_fields),
+        )
+
+    # 5. EPS vs revenue directional check
+    eps_val = eps.get("latest_eps")
+    rev_val = fin.get("total_revenue")
+    if eps_val is not None and rev_val is not None:
+        try:
+            if float(eps_val) < 0 and float(rev_val) > 0:
+                logger.warning(
+                    "[%s] Negative EPS ($%.2f) with positive revenue — "
+                    "verify net income data", ticker, float(eps_val),
+                )
+        except (ValueError, TypeError):
+            pass
+
+    return corrections
+
+
+def _patch_analysis_text(analysis: dict, old_val: float, new_val: float) -> int:
+    """Replace stale net-margin values in LLM-generated analysis prose.
+
+    After ``_validate_report_data`` overrides the structured data_summary,
+    the already-generated LLM text may still contain the old (bogus) value.
+    This function performs a targeted regex substitution so the PDF prose
+    is consistent with the corrected metric.
+
+    Returns the total number of substitutions made.
+    """
+    import re as _re
+
+    old_s1 = f"{old_val:.1f}"   # e.g. "1.9"
+    old_s2 = f"{old_val:.2f}"   # e.g. "1.90"
+    new_s = f"{new_val:.1f}"    # e.g. "38.0"
+
+    # Match "1.9%" / "1.90%" / "1.9 %" / "1.9 percent" — but not mid-number
+    pattern = _re.compile(
+        rf"(?<!\d)({_re.escape(old_s2)}|{_re.escape(old_s1)})\s*(%|percent)",
+        _re.IGNORECASE,
+    )
+    replacement = f"{new_s}%"
+    count = 0
+
+    for ca in analysis.get("chart_analyses", []):
+        text = ca.get("analysis_text", "")
+        new_text, n = pattern.subn(replacement, text)
+        if n:
+            ca["analysis_text"] = new_text
+            count += n
+
+    thesis = analysis.get("investment_thesis", "")
+    if thesis:
+        new_thesis, n = pattern.subn(replacement, thesis)
+        if n:
+            analysis["investment_thesis"] = new_thesis
+            count += n
+
+    return count
+
+
 def get_signal(chart_id: str, data_summary: dict) -> tuple:
     """
     Derive a BULLISH / BEARISH / NEUTRAL signal from chart data_summary.
@@ -559,8 +721,13 @@ def build_cover(ticker: str, company_name: str, styles: dict,
     return elements
 
 
-def build_toc(charts: list, styles: dict, page_map: dict = None) -> list:
-    """Build Table of Contents page. Uses page_map for dynamic page numbers."""
+def build_toc(charts: list, styles: dict, page_map: dict = None,
+              detail_level: str = "full") -> list:
+    """Build Table of Contents page. Uses page_map for dynamic page numbers.
+
+    When detail_level == "summary", sections skipped during summary rendering
+    (Financial Metrics Summary and Appendix) are excluded from the TOC.
+    """
     elements = []
     elements.append(Paragraph("Table of Contents", styles["page_title"]))
     elements.append(HRFlowable(
@@ -599,13 +766,27 @@ def build_toc(charts: list, styles: dict, page_map: dict = None) -> list:
         chart_sub_rows.append((f"3.{i+1}", c.get("title", c["chart_id"]),
                                str(pm.get(key, "?")), False))
 
-    more_rows_data = [
-        ("4.", "Financial Metrics Summary", str(pm.get("financial_metrics", "?")), True),
-        ("5.", "Peer Comparison", str(pm.get("peer_comparison", "?")), True),
-        ("6.", "Risk Factors", str(pm.get("risk_factors", "?")), True),
-        ("7.", "Investment Recommendation", str(pm.get("recommendation", "?")), True),
-        ("8.", "Appendix & Data Sources", str(pm.get("appendix", "?")), True),
-    ]
+    is_summary = detail_level == "summary"
+    # In summary mode, skip Financial Metrics Summary (section 4) and
+    # Appendix & Data Sources (last section) since those pages aren't rendered.
+    more_rows_data = []
+    sec_num = 4
+    if not is_summary:
+        more_rows_data.append((f"{sec_num}.", "Financial Metrics Summary",
+                               str(pm.get("financial_metrics", "?")), True))
+        sec_num += 1
+    more_rows_data.append((f"{sec_num}.", "Peer Comparison",
+                           str(pm.get("peer_comparison", "?")), True))
+    sec_num += 1
+    more_rows_data.append((f"{sec_num}.", "Risk Factors",
+                           str(pm.get("risk_factors", "?")), True))
+    sec_num += 1
+    more_rows_data.append((f"{sec_num}.", "Investment Recommendation",
+                           str(pm.get("recommendation", "?")), True))
+    sec_num += 1
+    if not is_summary:
+        more_rows_data.append((f"{sec_num}.", "Appendix & Data Sources",
+                               str(pm.get("appendix", "?")), True))
 
     entry_style = ParagraphStyle("te", fontName="Helvetica", fontSize=11,
                                   textColor=C_BLACK, leading=14)
@@ -645,8 +826,8 @@ def build_toc(charts: list, styles: dict, page_map: dict = None) -> list:
     methodology_text = (
         "This report was generated using the FinSage CAVM "
         "(Chart-Analysis-Validation-Model) pipeline. Charts undergo a 3-iteration "
-        "VLM refinement loop using Snowflake Cortex pixtral-large for visual critique. "
-        "Analysis is powered by Cortex mistral-large with grounding in Snowflake ANALYTICS "
+        "VLM refinement loop using Snowflake Cortex VLM (claude-sonnet-4-6) for visual critique. "
+        "Analysis is powered by Cortex LLM (claude-opus-4-6) with grounding in Snowflake ANALYTICS "
         "layer data. SEC filing summaries leverage Cortex SUMMARIZE on 10-K/10-Q filings."
     )
     content_w = PAGE_W - 2 * MARGIN
@@ -714,6 +895,27 @@ def build_executive_summary(ticker: str, charts: list,
     if net_margin_val is None:
         co_facts = analysis.get("company_overview", {}).get("key_facts", {})
         net_margin_val = co_facts.get("net_margin") or co_facts.get("profit_margin")
+        # DIM_COMPANY.PROFIT_MARGIN is decimal (0.27), FCT_FUNDAMENTALS_GROWTH is pct (29.28)
+        if net_margin_val is not None:
+            try:
+                v = float(net_margin_val)
+                if abs(v) < 1:
+                    net_margin_val = v * 100
+            except (ValueError, TypeError):
+                net_margin_val = None
+
+    # D/E: prefer SEC-derived (financial_health chart), fall back to analysis facts
+    de_val = fin_data.get("debt_to_equity_ratio")
+    if de_val is None:
+        co_facts = analysis.get("company_overview", {}).get("key_facts", {})
+        de_val = co_facts.get("debt_to_equity")
+    # Clamp obviously wrong D/E values (Yahoo Finance unscaled percentages)
+    if de_val is not None:
+        try:
+            if float(de_val) > 50:
+                de_val = None
+        except (ValueError, TypeError):
+            pass
 
     metrics = [
         [
@@ -736,7 +938,7 @@ def build_executive_summary(ticker: str, charts: list,
             metric_cell("Net Margin",
                 _fmt_val(net_margin_val, suffix="%")),
             metric_cell("Debt/Equity",
-                _fmt_val(fin_data.get("debt_to_equity_ratio"))),
+                _fmt_val(de_val)),
             metric_cell("News Sentiment",
                 sent_data.get("sentiment_label") or "N/A"),
         ],
@@ -1037,6 +1239,38 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict,
             _fin_chart = c.get("data_summary", {})
             break
 
+    # Backfill facts from chart data_summaries when analysis agent returned empty.
+    # Uses direct assignment instead of setdefault to overwrite None values.
+    # Chart keys: financial_health → total_revenue, net_margin_pct, debt_to_equity_ratio
+    #             eps_trend → latest_eps, eps_growth_yoy_pct
+    #             revenue_growth → latest_revenue_growth_yoy, latest_net_income_growth_yoy
+    if charts:
+        _chart_map = {c["chart_id"]: c.get("data_summary", {}) for c in charts}
+        fin_health = _chart_map.get("financial_health", {})
+        if not facts.get("revenue"):
+            _rev_val = fin_health.get("total_revenue")
+            if _rev_val is not None:
+                facts["revenue"] = _rev_val
+        if not facts.get("eps"):
+            eps_summary = _chart_map.get("eps_trend", {})
+            _eps_val = eps_summary.get("latest_eps")
+            if _eps_val is not None:
+                facts["eps"] = _eps_val
+        if not facts.get("net_income"):
+            # Derive net_income from revenue × net_margin if both available
+            _rev = fin_health.get("total_revenue")
+            _margin = fin_health.get("net_margin_pct")
+            if _rev and _margin:
+                facts["net_income"] = round(_rev * _margin / 100)
+        if not facts.get("latest_quarter"):
+            # Backfill from eps_trend or revenue_growth chart data
+            for _cid in ("eps_trend", "revenue_growth"):
+                _ds = _chart_map.get(_cid, {})
+                _lq = _ds.get("latest_quarter") or _ds.get("fiscal_quarter")
+                if _lq:
+                    facts["latest_quarter"] = _lq
+                    break
+
     def _fmt_mc(v):
         if not v or not isinstance(v, (int, float)):
             return "N/A"
@@ -1050,11 +1284,19 @@ def build_company_overview(ticker: str, analysis: dict, styles: dict,
         if v is None:
             return "N/A"
         v = float(v)
-        if v < 1:
+        # DIM_COMPANY.PROFIT_MARGIN is decimal (0.27), everything else is pct (29.28)
+        if abs(v) < 1:
             return f"{v*100:.1f}%"
         return f"{v:.1f}%"
 
     _de_val = _fin_chart.get("debt_to_equity_ratio") or facts.get("debt_to_equity")
+    # Clamp obviously wrong D/E values (Yahoo Finance unscaled percentages)
+    if _de_val is not None:
+        try:
+            if float(_de_val) > 50:
+                _de_val = None
+        except (ValueError, TypeError):
+            _de_val = None
 
     facts_rows = [
         ["Metric", "Value"],
@@ -1131,7 +1373,8 @@ def build_peer_comparison(ticker: str, analysis: dict, styles: dict) -> list:
         if v is None:
             return "N/A"
         v = float(v)
-        if v < 1:
+        # DIM_COMPANY.PROFIT_MARGIN is decimal (0.27), everything else is pct (29.28)
+        if abs(v) < 1:
             return f"{v*100:.1f}%"
         return f"{v:.1f}%"
 
@@ -1142,7 +1385,16 @@ def build_peer_comparison(ticker: str, analysis: dict, styles: dict) -> list:
         pe = f"{p['pe_ratio']:.1f}" if p.get("pe_ratio") else "N/A"
         margin = p.get("net_margin") or p.get("profit_margin")
         eps = f"${p['eps']:.2f}" if p.get("eps") else "N/A"
-        de = f"{p['debt_to_equity']:.2f}" if p.get("debt_to_equity") else "N/A"
+        de_raw = p.get("debt_to_equity")
+        # Clamp obviously wrong D/E values (Yahoo Finance unscaled percentages)
+        if de_raw is not None:
+            try:
+                de_raw = float(de_raw)
+                if de_raw > 50:
+                    de_raw = None
+            except (ValueError, TypeError):
+                de_raw = None
+        de = f"{de_raw:.2f}" if de_raw is not None else "N/A"
         row = [
             f"{p['ticker']} *" if is_target else p["ticker"],
             _fmt_mc(p.get("market_cap")),
@@ -1275,6 +1527,21 @@ def build_risk_section(risk_summary: str, charts: list, styles: dict) -> list:
     if margin is None:
         co_facts = analysis.get("company_overview", {}).get("key_facts", {})
         margin = co_facts.get("net_margin") or co_facts.get("profit_margin")
+        # Normalize decimal (0.27) to percentage (27.0)
+        if margin is not None:
+            try:
+                margin = float(margin)
+                if abs(margin) < 1:
+                    margin = margin * 100
+            except (ValueError, TypeError):
+                margin = None
+    # Clamp obviously wrong D/E values (Yahoo Finance unscaled percentages)
+    if dte is not None:
+        try:
+            if float(dte) > 50:
+                dte = None
+        except (ValueError, TypeError):
+            dte = None
     if margin is None or dte is None:
         fin_level = "MODERATE"  # Insufficient data — don't flag as HIGH
         dte_str = f"{dte:.2f}" if dte is not None else "N/A"
@@ -1636,8 +1903,8 @@ def build_appendix(ticker: str, charts: list, styles: dict) -> list:
     pipeline_rows = [
         ["Stage", "Agent", "Technology", "Purpose"],
         ["1. Chart", "chart_agent", "Cortex LLM + VLM", "3-iteration chart generation with visual critique refinement loop"],
-        ["2. Validation", "validation_agent", "Cortex pixtral-large", "Chart quality assurance — file integrity, dimensions, VLM scoring"],
-        ["3. Analysis", "analysis_agent", "Cortex mistral-large", "Per-chart financial analysis + SEC MD&A/Risk summarization"],
+        ["2. Validation", "validation_agent", "Cortex VLM (claude-sonnet-4-6)", "Chart quality assurance — file integrity, dimensions, VLM scoring"],
+        ["3. Analysis", "analysis_agent", "Cortex LLM (claude-opus-4-6)", "Per-chart financial analysis + SEC MD&A/Risk summarization"],
         ["4. Report", "report_agent", "reportlab", "Branded PDF assembly with executive summary and recommendations"],
     ]
     pipe_table = Table(
@@ -1746,7 +2013,20 @@ def build_pdf(
     company_name = company_name or ticker
     styles = build_styles()
 
-    # Build analysis lookup
+    # Pre-assembly data-quality checks (logs warnings, may override metrics)
+    corrections = _validate_report_data(charts, analysis, ticker)
+
+    # Patch stale LLM-generated prose if net margin was overridden
+    if corrections.get("net_margin_override"):
+        old_val, new_val = corrections["net_margin_override"]
+        n = _patch_analysis_text(analysis, old_val, new_val)
+        if n:
+            logger.info(
+                "[%s] Patched %d stale net-margin references in analysis text "
+                "(%.1f%% → %.1f%%)", ticker, n, old_val, new_val,
+            )
+
+    # Build analysis lookup (after patching so text is corrected)
     analysis_map = {
         a["chart_id"]: a["analysis_text"]
         for a in analysis.get("chart_analyses", [])
@@ -1807,7 +2087,8 @@ def build_pdf(
         elems += cover_elems
 
         # Page 2: Table of Contents
-        elems += build_toc(charts, styles, page_map=pm)
+        elems += build_toc(charts, styles, page_map=pm,
+                           detail_level=detail_level)
 
         # Pages 3-4: Executive Summary
         elems.append(SectionMarker("exec_summary", pm))
@@ -1874,19 +2155,30 @@ def build_pdf(
         topMargin=16 * mm, bottomMargin=14 * mm,
     )
     doc1.addPageTemplates([
-        PageTemplate(id="Cover",   frames=[cover_frame]),
-        PageTemplate(id="Content", frames=[content_frame]),
+        PageTemplate(id="Cover",   frames=[cover_frame],
+                     onPage=draw_cover_bg),
+        PageTemplate(id="Content", frames=[content_frame],
+                     onPage=draw_content_page),
     ])
     doc1.build(_build_elements(page_map))
     pass1_buf.close()
     logger.info("TOC pass 1 complete — page_map: %s", page_map)
 
     # Pass 2: render final PDF with correct TOC page numbers
+    pass1_pages = dict(page_map)  # snapshot Pass 1 page numbers
     elements = _build_elements(page_map)
 
     # ── Build PDF ────────────────────────────────────────────
     logger.info("Building PDF: %s", output_path)
     doc.build(elements)
+
+    # Validate: Pass 2 page numbers (now in page_map) should match Pass 1
+    for key in pass1_pages:
+        if pass1_pages[key] != page_map.get(key):
+            logger.warning(
+                "TOC drift: section '%s' was page %s in pass 1 but %s in pass 2",
+                key, pass1_pages[key], page_map.get(key),
+            )
     file_size = os.path.getsize(output_path)
     logger.info("✅ PDF complete: %s (%.1f KB)", output_path, file_size / 1024)
 

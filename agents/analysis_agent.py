@@ -925,6 +925,28 @@ def _query_company_facts(session: Session, ticker: str) -> dict:
     except Exception as e:
         logger.warning("Could not query FCT_FUNDAMENTALS_GROWTH for %s: %s", ticker, e)
 
+    # Override D/E with SEC-derived ratio (DIM_COMPANY value from Yahoo Finance
+    # can be an unscaled percentage, e.g. 102.63 instead of the actual ratio 3.30)
+    try:
+        sec_rows = session.sql(f"""
+            SELECT DEBT_TO_EQUITY_RATIO, NET_MARGIN_PCT
+            FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
+            WHERE TICKER = '{safe_ticker}'
+              AND REPORTING_FREQUENCY = 'quarterly'
+              AND DEBT_TO_EQUITY_RATIO IS NOT NULL
+            ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC
+            LIMIT 1
+        """).collect()
+        if sec_rows:
+            r = sec_rows[0]
+            if r["DEBT_TO_EQUITY_RATIO"] is not None:
+                facts["debt_to_equity"] = float(r["DEBT_TO_EQUITY_RATIO"])
+            if r["NET_MARGIN_PCT"] is not None and facts.get("net_margin") is None:
+                facts["net_margin"] = float(r["NET_MARGIN_PCT"])
+    except Exception as e:
+        logger.warning("Could not query FCT_SEC_FINANCIAL_SUMMARY for D/E override for %s: %s",
+                        ticker, e)
+
     return facts
 
 
@@ -1151,6 +1173,13 @@ def generate_peer_comparison(session: Session, ticker: str,
     except Exception as e:
         logger.warning("Could not query FCT_SEC_FINANCIAL_SUMMARY for D/E override: %s", e)
 
+    # Clamp D/E outliers: values beyond ±20 are likely data issues
+    for t, data in company_map.items():
+        de = data.get("debt_to_equity")
+        if de is not None and abs(de) > 20:
+            logger.warning("Clamping extreme D/E for %s: %.2f → None", t, de)
+            data["debt_to_equity"] = None
+
     # Build peers list (target first, then peers) — exclude peers with no data
     excluded_peers = []
     for t in all_tickers:
@@ -1208,12 +1237,27 @@ def generate_peer_comparison(session: Session, ticker: str,
                 f"{p['ticker']}: Market Cap {mc}, P/E {pe}, Net Margin {m_str}, EPS {eps}"
             )
 
+        # Determine factual market-cap ranking to ground LLM claims
+        _mc_ranked = sorted(
+            [(p["ticker"], p.get("market_cap") or 0) for p in peers_data],
+            key=lambda x: x[1], reverse=True,
+        )
+        _mc_leader = _mc_ranked[0] if _mc_ranked else None
+        _mc_note = ""
+        if _mc_leader and _mc_leader[1] > 0:
+            _mc_note = (
+                f"\n\nIMPORTANT: Based on the data above, {_mc_leader[0]} has the largest "
+                f"market cap ({_fmt_mc(_mc_leader[1])}) in this peer group. Do NOT claim "
+                f"any other company is 'the largest' or 'the most valuable' unless the "
+                f"data supports it. Avoid unsupported superlatives.\n"
+            )
+
         if detail_level == "summary":
             prompt = (
                 f"You are a senior equity research analyst. "
                 f"Compare {safe_ticker} against its peer group in 1-2 sentences. "
                 f"Highlight the most notable relative strength or weakness.\n\n"
-                f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
+                f"Peer Group Data:\n" + "\n".join(comparison_lines) + _mc_note + "\n\n"
                 f"Write in third person, professional tone. Do not use bullet points."
             )
         else:
@@ -1222,7 +1266,7 @@ def generate_peer_comparison(session: Session, ticker: str,
                 f"Compare {safe_ticker} against its peer group and write a concise 3-4 sentence "
                 f"comparative analysis. Highlight relative strengths and weaknesses in valuation, "
                 f"profitability, and scale. Be specific with numbers.\n\n"
-                f"Peer Group Data:\n" + "\n".join(comparison_lines) + "\n\n"
+                f"Peer Group Data:\n" + "\n".join(comparison_lines) + _mc_note + "\n\n"
                 f"Write in third person, professional tone. Do not use bullet points."
             )
 

@@ -66,7 +66,9 @@ SELECT
     f.market_cap,
     f.pe_ratio,
     f.profit_margin,
-    f.debt_to_equity,
+    -- Yahoo Finance reports D/E as a percentage (e.g. 63.78 = 63.78%);
+    -- normalise to a ratio (0.6378) consistent with FCT_SEC_FINANCIAL_SUMMARY.
+    ROUND(f.debt_to_equity / 100, 4) AS debt_to_equity,
 
     -- Price data availability
     sr.price_history_start,

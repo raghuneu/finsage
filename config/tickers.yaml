@@ -14,6 +14,10 @@ tickers:
   - ADBE   # Adobe
   - AMD    # Advanced Micro Devices
 
+  # Social Media (META peers)
+  - SNAP   # Snap Inc.
+  - PINS   # Pinterest
+
   # Consumer / Retail
   - AMZN   # Amazon
   - TSLA   # Tesla

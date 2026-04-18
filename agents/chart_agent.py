@@ -105,6 +105,9 @@ def fetch_fundamentals_growth(session, ticker: str) -> pd.DataFrame:
     df.columns = [c.lower() for c in df.columns]
     if "fiscal_quarter" in df.columns and not df.empty:
         df["_sort_key"] = df["fiscal_quarter"].map(_fiscal_quarter_sort_key)
+        # Filter out future quarters (beyond current year)
+        current_year = datetime.now().year
+        df = df[df["_sort_key"].apply(lambda k: k[0] <= current_year)]
         df = df.sort_values("_sort_key").drop(columns="_sort_key").reset_index(drop=True)
     return df
 
@@ -153,6 +156,7 @@ def fetch_sec_financial_summary(session, ticker: str) -> pd.DataFrame:
         FROM ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY
         WHERE TICKER = '{ticker.upper()}'
           AND REPORTING_FREQUENCY = 'quarterly'
+          AND FISCAL_YEAR <= YEAR(CURRENT_DATE)
         ORDER BY FISCAL_YEAR DESC, FISCAL_PERIOD DESC
         LIMIT 12
     """).to_pandas()
@@ -198,6 +202,9 @@ def build_revenue_summary(df: pd.DataFrame) -> dict:
         "latest_net_income_growth_yoy": round(float(yoy_ni), 1) if pd.notna(yoy_ni) else (round(float(qoq_ni), 1) if pd.notna(qoq_ni) else None),
         "growth_type": "YoY" if pd.notna(yoy_rev) else "QoQ",
         "fundamental_signal": str(latest["fundamental_signal"]),
+        "latest_revenue": float(latest["revenue"]) if pd.notna(latest.get("revenue")) else None,
+        "latest_net_income": float(latest["net_income"]) if pd.notna(latest.get("net_income")) else None,
+        "latest_quarter": str(latest["fiscal_quarter"]) if pd.notna(latest.get("fiscal_quarter")) else None,
     }
 
 
@@ -207,6 +214,7 @@ def build_eps_summary(df: pd.DataFrame) -> dict:
         "latest_eps": round(float(latest["eps"]), 2) if pd.notna(latest["eps"]) else None,
         "eps_growth_yoy_pct": round(float(latest["eps_growth_yoy_pct"]), 1) if pd.notna(latest["eps_growth_yoy_pct"]) else None,
         "eps_growth_qoq_pct": round(float(latest["eps_growth_qoq_pct"]), 1) if pd.notna(latest["eps_growth_qoq_pct"]) else None,
+        "latest_quarter": str(latest["fiscal_quarter"]) if pd.notna(latest.get("fiscal_quarter")) else None,
     }
 
 
@@ -1130,6 +1138,22 @@ def generate_charts(
     sec_df = fetch_sec_financial_summary(session, ticker)
 
     # Map chart_id -> (raw_dataframe, data_summary_builder)
+    # For margin_trend, fall back to fund_df if SEC margins are all NULL
+    margin_trend_df = sec_df
+    if (sec_df.empty
+        or ("net_margin_pct" in sec_df.columns
+            and sec_df["net_margin_pct"].isna().all()
+            and not fund_df.empty
+            and "net_margin_pct" in fund_df.columns
+            and not fund_df["net_margin_pct"].isna().all())):
+        logger.info("SEC net_margin_pct all NULL — falling back to FCT_FUNDAMENTALS_GROWTH for margin_trend")
+        # Reshape fund_df to match expected columns for margin_trend
+        _mtdf = fund_df[["fiscal_quarter", "net_margin_pct"]].copy()
+        _mtdf = _mtdf.rename(columns={"fiscal_quarter": "fiscal_period"})
+        # Add operating_margin_pct as NaN (not available in fundamentals table)
+        _mtdf["operating_margin_pct"] = None
+        margin_trend_df = _mtdf
+
     chart_data_map = {
         "price_sma":        (stock_df, build_price_summary),
         "volatility":       (stock_df, build_volatility_summary),
@@ -1137,7 +1161,7 @@ def generate_charts(
         "eps_trend":        (fund_df,  build_eps_summary),
         "sentiment":        (news_df,  build_sentiment_summary),
         "financial_health": (sec_df,   build_financial_health_summary),
-        "margin_trend":     (sec_df,   build_margin_trend_summary),
+        "margin_trend":     (margin_trend_df, build_margin_trend_summary),
         "balance_sheet":    (sec_df,   build_balance_sheet_summary),
     }
 

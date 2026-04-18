@@ -28,34 +28,26 @@ WITH base AS (
 
 -- Deduplicate: 10-Q filings report both a current-period value and a
 -- prior-year comparison value for the same concept+fiscal_period.
--- Strategy differs by concept type:
---   • Income-statement / flow items → keep the SMALLEST value
---     (standalone quarter, not cumulative YTD).
---   • Balance-sheet / point-in-time items → keep the LATEST period_end
---     (current snapshot, not prior-year comparison).
+-- Prior-year rows have YEAR(period_end) < fiscal_year.
+-- Strategy: first filter to current-period rows only (period_end year =
+-- fiscal_year), then among remaining duplicates pick the latest period_end
+-- with the most recent filing date as tiebreaker.
+current_period AS (
+    SELECT *
+    FROM base
+    WHERE YEAR(TO_DATE(TRIM(period_end, '"'), 'YYYY-MM-DD')) = fiscal_year
+),
+
 deduped AS (
     SELECT *
     FROM (
         SELECT
-            base.*,
+            current_period.*,
             ROW_NUMBER() OVER (
                 PARTITION BY ticker, cik, concept, fiscal_year, fiscal_period
-                ORDER BY
-                    CASE
-                        WHEN concept IN (
-                            'Assets', 'Liabilities', 'StockholdersEquity',
-                            'CashAndCashEquivalentsAtCarryingValue'
-                        ) THEN period_end           -- balance sheet: latest snapshot
-                    END DESC,
-                    CASE
-                        WHEN concept NOT IN (
-                            'Assets', 'Liabilities', 'StockholdersEquity',
-                            'CashAndCashEquivalentsAtCarryingValue'
-                        ) THEN ABS(value)           -- income stmt: smallest value
-                    END ASC,
-                    filed_date DESC
+                ORDER BY period_end DESC, filed_date DESC
             ) AS _rn
-        FROM base
+        FROM current_period
     )
     WHERE _rn = 1
 ),

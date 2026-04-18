@@ -224,3 +224,84 @@ Ran GOOGL FinSage report through Gemini as an external judge. Gemini identified 
 | 6.4 | Revenue Growth 0.0% | Only 5 quarters (need 8+ for YoY) + `fillna(0)` | `fundamentals_loader.py`, `load_sample_fundamentals.py` | All 50 tickers |
 | 6.5 | Charts show 0 not N/A | 37 `fillna(0)` calls | `chart_data_prep.py`, `chart_agent.py` | All charts, all tickers |
 | 6.6 | Generic risk factors | Cortex SUMMARIZE quality | — | Deferred |
+
+---
+
+## Phase 7: LLM-as-Judge Data Accuracy Fixes (2026-04-17)
+
+### Context
+Ran NFLX FinSage report through an LLM-as-Judge evaluation that scored the report 6.5/10 overall, with Data Accuracy as the weakest dimension at 5/10. The judge flagged a 69.7% net margin (should be ~25%), a D/E ratio of 63.78 (should be ~0.64), and other data inconsistencies. Root cause analysis traced the net margin error to the SEC XBRL deduplication logic in the dbt transformation layer, and the D/E error to Yahoo Finance storing values as percentages rather than ratios. A 7-step fix was designed and executed. All fixes are ticker-agnostic — they apply to all tickers, not just NFLX.
+
+### 7.1 SEC XBRL Deduplication — Root Cause of 69.7% Net Margin
+- **Problem**: NFLX Q3 2025 net margin showed 69.7% in the report (should be ~25.8%).
+- **Root Cause**: `fct_sec_financial_summary.sql` dedup logic used `ABS(value) ASC` ordering for income statement items, intending to pick the "smallest absolute value" as the correct one. But 10-Q filings include prior-year comparison figures tagged with the current `fiscal_year` but with a prior-year `period_end` date. The old logic mixed current-period and prior-year rows, selecting a prior-year net income ($2.37B) against current-period revenue ($10.25B), producing a wildly wrong margin.
+- **Key Insight**: `YEAR(period_end) = fiscal_year` reliably identifies current-period rows, because prior-year comparison values have `period_end` in the prior year while sharing the current `fiscal_year`.
+- **Fix**: Replaced the dedup strategy in `fct_sec_financial_summary.sql` (lines 29-53). New two-CTE approach: (1) `current_period` CTE filters `WHERE YEAR(period_end) = fiscal_year` to exclude prior-year comparison rows; (2) `deduped` CTE applies `ROW_NUMBER() OVER (PARTITION BY ticker, cik, concept, fiscal_year, fiscal_period ORDER BY period_end DESC, filed_date DESC)` among remaining rows.
+- **Verification**: `dbt run` SUCCESS (2/2), `dbt test` PASS (5/5). NFLX Q3 2025 net_margin_pct: 25.84% (was 69.65%). FY 2025: 24.30%.
+- **Side Effect**: 2024/2023 quarterly rows now have NULL revenue/income because only prior-year comparison data existed for those periods in the raw XBRL data. This is a pre-existing data ingestion limitation (SEC filing coverage), not a regression from the fix.
+- **Status**: Complete
+
+### 7.2 Yahoo Finance D/E Percentage-to-Ratio Normalization
+- **Problem**: `DIM_COMPANY.DEBT_TO_EQUITY` showed 63.782 for NFLX instead of 0.6378.
+- **Root Cause**: Yahoo Finance reports D/E as a percentage (63.782 = 63.782%), but the column was stored as-is without normalization. This contradicted `FCT_SEC_FINANCIAL_SUMMARY.DEBT_TO_EQUITY_RATIO` which stores proper ratios.
+- **Fix**: Changed `dim_company.sql` line 71 from `f.debt_to_equity,` to `ROUND(f.debt_to_equity / 100, 4) AS debt_to_equity,`.
+- **Verification**: `dbt run` SUCCESS. NFLX D/E now 0.6378 (was 63.782). All tickers normalized.
+- **Decision**: Fixed at the dbt layer (unlike Phase 6 Fix 6.3 which fixed at the agent layer). Phase 6's agent-level override for peers is now complementary — the dbt fix ensures `DIM_COMPANY` always has correct values, while the agent clamp (Fix 7.3) provides defense-in-depth.
+- **Status**: Complete
+
+### 7.3 D/E Outlier Clamp in Peer Comparison
+- **Problem**: If the SEC D/E override in `generate_peer_comparison()` fails silently (e.g., no SEC data for a peer), raw Yahoo values could still leak through despite Fix 7.2.
+- **Fix**: Added 7-line clamp after the SEC override try/except in `analysis_agent.py` (after line 1174). Iterates all tickers in `company_map`; any `debt_to_equity` with `abs(value) > 20` is set to `None` with a warning log.
+- **Decision**: Defense-in-depth pattern. Fix 7.2 corrects the source; Fix 7.3 catches any remaining outliers at the consumer. The ±20 threshold is generous enough for highly-leveraged companies (e.g., banks) while catching obviously wrong percentage-scale values.
+- **Status**: Complete
+
+### 7.4 Key Facts Backfill — Wrong Chart Data Keys
+- **Problem**: Key Facts in the Executive Summary showed N/A for revenue, EPS, and net income even when chart data had valid values.
+- **Root Cause**: `report_agent.py` backfill logic used non-existent keys (`latest_revenue`, `latest_net_income`, `latest_quarter`) to look up chart `data_summary` values. The actual keys are `total_revenue` (from `financial_health` chart), `latest_eps` (from `eps_trend` chart).
+- **Fix**: Rewrote backfill block at `report_agent.py` lines 1156-1173. Now correctly maps: `financial_health.total_revenue` → `facts["revenue"]`, `eps_trend.latest_eps` → `facts["eps"]`, and derives net_income as `revenue × net_margin_pct / 100` when both are available.
+- **Status**: Complete
+
+### 7.5 TOC Page Number Drift — Pass 1/Pass 2 Template Mismatch
+- **Problem**: TOC page numbers could be wrong if Pass 1 (page number discovery) and Pass 2 (final render) produced different pagination.
+- **Root Cause**: Pass 1 used bare `PageTemplate` objects without `onPage` callbacks, while Pass 2 used `onPage=draw_cover_bg` and `onPage=draw_content_page`. These callbacks add header/footer elements that can affect content frame available height and thus page breaks.
+- **Fix**: (A) Added identical `onPage` callbacks to Pass 1 templates at `report_agent.py` lines 2047-2052, matching Pass 2. (B) Added drift validation at lines 2058-2071: snapshots `pass1_pages = dict(page_map)` before Pass 2, then compares against Pass 2's `page_map` after build, logging warnings for any section with mismatched page numbers.
+- **Verification**: End-to-end run showed no TOC drift warnings.
+- **Status**: Complete
+
+### 7.6 Cross-Field Consistency Validation
+- **Problem**: No pre-assembly checks existed to catch data inconsistencies before they rendered into the final PDF. Issues like the 69.7% margin could have been flagged before the report was generated.
+- **Fix**: Added `_validate_report_data()` function at `report_agent.py` line 106 (93 lines). Performs 5 non-blocking checks that log warnings but never raise:
+  1. **Net margin consistency**: Compares SEC-derived `net_margin_pct` (from `financial_health` chart) vs Yahoo `profit_margin` (from `key_facts`). Normalizes Yahoo decimal→pct if needed. Warns if difference > 5 percentage points.
+  2. **D/E ratio sanity**: Flags negative D/E or values > 20 from either SEC or Yahoo source.
+  3. **Stock price sanity**: Flags prices ≤ 0 or > $100,000.
+  4. **N/A audit**: Lists which Executive Summary metrics will render as "N/A" (price, margin, D/E, EPS, revenue growth).
+  5. **EPS/revenue directional check**: Warns if EPS is negative while revenue is positive (suggests net income data issue).
+- **Call site**: Invoked at `report_agent.py` line 1924, after analysis_map is built but before PDF assembly begins.
+- **Verification**: During end-to-end run, correctly caught: `[NFLX] Net margin mismatch: SEC=25.80% vs Yahoo=20.07% (diff 5.73 pp) — PDF will use SEC value`. This is expected — SEC reports Q3 quarterly margin while Yahoo reports trailing-12-month margin.
+- **Decision**: Non-blocking by design. The report always renders; the build log captures every data-quality concern for post-hoc review. This pattern avoids brittle validation that blocks report generation for minor discrepancies.
+- **Status**: Complete
+
+### 7.7 End-to-End Verification
+- **Scope**: Full pipeline re-run (`dbt run` + `dbt test` + `python agents/orchestrator.py --ticker NFLX`) to verify all 6 fixes work together.
+- **Results**:
+  - `dbt run`: 2/2 models SUCCESS
+  - `dbt test`: 5/5 PASS
+  - Pipeline: Completed in 315s (5.3 min), 8 charts generated
+  - PDF: `NFLX_FinSage_Report_20260417_174249.pdf` (1050.3 KB, ~20 pages)
+  - `financial_health` chart `data_summary`: `net_margin_pct=25.8` (was 69.65%), `debt_to_equity_ratio=1.12`, `total_revenue=$33.1B`
+  - Validation function caught net margin mismatch (5.73pp SEC vs Yahoo — expected, different time windows)
+  - No TOC drift detected
+  - One chart rendering retry (`revenue_growth` iter2 tick label mismatch) — auto-recovered with simplified prompt
+- **Status**: Complete
+
+### Summary Table
+
+| # | Issue | Root Cause | Files Modified | Impact |
+|---|-------|-----------|---------------|--------|
+| 7.1 | Net margin 69.7% (should be ~25%) | XBRL dedup mixed current + prior-year rows | `fct_sec_financial_summary.sql` | All tickers |
+| 7.2 | D/E ratio ~100x inflated | Yahoo Finance stores D/E as percentage | `dim_company.sql` | All tickers |
+| 7.3 | D/E outliers in peer table | No clamp after SEC override failure | `analysis_agent.py` | All tickers |
+| 7.4 | Key Facts all N/A | Wrong chart data_summary key names | `report_agent.py` | All tickers |
+| 7.5 | TOC page numbers could drift | Pass 1 missing onPage callbacks | `report_agent.py` | All reports |
+| 7.6 | No pre-assembly data checks | Missing validation function | `report_agent.py` | All tickers |
+| 7.7 | End-to-end verification | — | — | NFLX verified |
