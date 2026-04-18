@@ -19,3 +19,16 @@ outputs/
 
 # Claude Code local settings (not shared)
 .claude/settings.local.json.claude/
+
+# IDE configs
+.idea/
+.vscode/
+
+# Tool caches
+.playwright-mcp/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Stray git artifacts
+FETCH_HEAD
