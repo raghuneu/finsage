@@ -24,6 +24,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ArticleIcon from '@mui/icons-material/Article';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useTicker } from '@/lib/ticker-context';
 import { getCompanyName } from '@/lib/company-names';
@@ -48,7 +49,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const currentPage = NAV_ITEMS.find(
     (item) => pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path))
-  );
+  ) || (pathname.startsWith('/architecture') ? { label: 'Architecture', path: '/architecture', icon: <AccountTreeIcon /> } : undefined);
 
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -186,7 +187,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <Divider />
 
       {/* Navigation */}
-      <List sx={{ flexGrow: 1, px: 1, py: 1.5 }}>
+      <List sx={{ px: 1, py: 1.5 }}>
         {NAV_ITEMS.map((item) => {
           const isActive =
             pathname === item.path ||
@@ -237,6 +238,58 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           );
         })}
       </List>
+
+      {/* Spacer pushes Architecture + Footer to bottom */}
+      <Box sx={{ flexGrow: 1 }} />
+
+      {/* Architecture — pinned above footer */}
+      <Box sx={{ px: 1, pb: 0.5 }}>
+        {(() => {
+          const isActive = pathname.startsWith('/architecture');
+          return (
+            <ListItemButton
+              onClick={() => {
+                router.push('/architecture');
+                if (isMobile) setMobileOpen(false);
+              }}
+              sx={{
+                borderRadius: 1.5,
+                py: 0.75,
+                backgroundColor: isActive ? 'rgba(0,0,0,0.06)' : 'transparent',
+                borderLeft: isActive ? '3px solid #03B792' : '3px solid transparent',
+                '&:hover': {
+                  backgroundColor: isActive
+                    ? 'rgba(0,0,0,0.06)'
+                    : 'rgba(0,0,0,0.03)',
+                },
+              }}
+            >
+              <ListItemIcon
+                sx={{
+                  minWidth: 34,
+                  color: isActive ? '#2C2A25' : '#6B7280',
+                  '& .MuiSvgIcon-root': { fontSize: '1.15rem' },
+                }}
+              >
+                <AccountTreeIcon />
+              </ListItemIcon>
+              <ListItemText
+                primary="Architecture"
+                slotProps={{
+                  primary: {
+                    sx: {
+                      fontSize: '0.82rem',
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? '#2C2A25' : '#6B7280',
+                      letterSpacing: '0.01em',
+                    },
+                  },
+                }}
+              />
+            </ListItemButton>
+          );
+        })()}
+      </Box>
 
       <Divider />
 
@@ -369,7 +422,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }}
       >
         {/* Page header */}
-        {currentPage && (
+        {currentPage && pathname !== '/architecture' && (
           <Box sx={{ mb: 3, display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
             <Typography
               variant="h4"
