@@ -353,7 +353,6 @@ The `dbt_finsage/models/exposures.yml` file documents all downstream consumers o
 | `react_dashboard` | application | All 5 analytics models |
 | `cavm_report_pipeline` | ml | All 5 analytics models |
 | `streamlit_analytics_explorer` | application | 4 analytics models |
-| `ask_finsage_chat` | application | `fct_stock_metrics`, `dim_company`, `fct_fundamentals_growth` |
 | `airflow_data_quality_gate` | application | All 5 analytics models |
 
 These exposures enable dbt to show lineage from source tables all the way through to the applications that consume them.

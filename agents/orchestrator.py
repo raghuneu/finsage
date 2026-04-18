@@ -346,6 +346,7 @@ def generate_report_pipeline(
     skip_charts: bool = False,
     charts_dir: str = None,
     detail_level: str = "detailed",
+    auto_load: bool = True,
     on_stage: callable = None,
     on_message: callable = None,
 ) -> dict:
@@ -360,6 +361,10 @@ def generate_report_pipeline(
         charts_dir:   Path to previous chart output dir (used with skip_charts)
         detail_level: "detailed" for full 15-20 page report,
                       "summary" for condensed 8-10 page report
+        auto_load:    If True (default), automatically fetch missing data
+                      (stock prices, fundamentals, news, SEC filings) and run
+                      dbt before generating the report. Ensures custom tickers
+                      work out of the box.
         on_stage:     Optional callback invoked with stage index (0-3) as each
                       stage begins. Used by the API to report progress.
         on_message:   Optional callback invoked with a human-readable string
@@ -395,6 +400,49 @@ def generate_report_pipeline(
     os.makedirs(run_dir, exist_ok=True)
 
     session = get_session()
+
+    # ── Auto-load: fetch missing data before pipeline ─────
+    if auto_load:
+        try:
+            sys.path.insert(0, str(PROJECT_ROOT / "src"))
+            from utils.data_readiness import check_data_readiness
+            readiness = check_data_readiness(session, ticker)
+
+            if not readiness["ready"]:
+                missing_str = ", ".join(readiness["missing"])
+                logger.info("Data missing for %s: %s — auto-loading", ticker, missing_str)
+                print(f"  Auto-loading missing data: {missing_str}")
+
+                _msg_fn = on_message or (lambda _: None)
+                _msg_fn(f"Loading missing data for {ticker}: {missing_str}…")
+
+                from utils.on_demand_loader import ensure_data_for_ticker
+
+                def _load_progress(stage: str, detail: str = "") -> None:
+                    logger.info("Auto-load [%s]: %s", stage, detail)
+                    _msg_fn(f"[Data Load] {detail}" if detail else f"[Data Load] {stage}")
+
+                load_result = ensure_data_for_ticker(
+                    ticker=ticker,
+                    session=session,
+                    include_s3_filings=True,
+                    progress_callback=_load_progress,
+                )
+                final_readiness = load_result.get("readiness", {})
+                if final_readiness.get("min_viable"):
+                    logger.info("Auto-load complete for %s — data is ready", ticker)
+                    print(f"  Data loaded successfully for {ticker}")
+                else:
+                    logger.warning(
+                        "Auto-load finished but data still insufficient for %s: %s",
+                        ticker, final_readiness.get("missing", []),
+                    )
+                    print(f"  Warning: some data sources could not be loaded")
+            else:
+                logger.info("Data already ready for %s — skipping auto-load", ticker)
+        except Exception as exc:
+            logger.warning("Auto-load failed for %s: %s — continuing with available data", ticker, exc)
+            print(f"  Warning: auto-load failed ({exc}) — continuing with available data")
 
     # Tag all Snowflake queries with run_id for ACCOUNT_USAGE attribution
     try:
@@ -603,6 +651,10 @@ Examples:
         choices=["detailed", "summary"],
         help="Report detail level: 'detailed' (full 15-20 pages) or 'summary' (condensed 8-10 pages)"
     )
+    parser.add_argument(
+        "--no-auto-load", action="store_true",
+        help="Skip automatic data loading for missing tickers (use only data already in Snowflake)"
+    )
     args = parser.parse_args()
 
     generate_report_pipeline(
@@ -611,4 +663,5 @@ Examples:
         skip_charts=args.skip_charts,
         charts_dir=args.charts_dir,
         detail_level=args.detail_level,
+        auto_load=not args.no_auto_load,
     )

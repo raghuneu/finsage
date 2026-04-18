@@ -22,6 +22,7 @@ Outputs:
 
 import os
 import logging
+import re
 import threading
 from typing import Optional
 from snowflake.snowpark import Session
@@ -639,13 +640,56 @@ def _fetch_sec_text_rag(ticker: str, chart_id: str = None) -> dict:
         return {"mda_text": "", "risk_text": ""}
 
 
+def _extract_section(text: str, heading: str, max_chars: int = 50_000) -> str:
+    """Extract a named section from full SEC filing text.
+
+    Uses case-insensitive matching to find sections like
+    "Management's Discussion and Analysis" or "Risk Factors".
+    Returns the text between the heading and the next major heading,
+    truncated to *max_chars*.
+    """
+    if not text:
+        return ""
+    # Common SEC filing section headings used as stop markers
+    stop_headings = [
+        r"item\s+\d",
+        r"part\s+(?:i{1,3}|iv|[1-4])",
+        r"signatures",
+        r"financial\s+statements",
+        r"quantitative\s+and\s+qualitative",
+        r"controls\s+and\s+procedures",
+        r"legal\s+proceedings",
+        r"mine\s+safety",
+        r"unresolved\s+staff\s+comments",
+    ]
+    # Find the start of the target section
+    pattern = re.compile(re.escape(heading), re.IGNORECASE)
+    match = pattern.search(text)
+    if not match:
+        return ""
+    start = match.end()
+    # Find the next major heading after the start
+    remaining = text[start:start + max_chars + 10_000]
+    stop_pattern = re.compile(
+        r"\n\s*(?:" + "|".join(stop_headings) + r")\b",
+        re.IGNORECASE,
+    )
+    stop_match = stop_pattern.search(remaining, pos=200)  # skip at least 200 chars
+    if stop_match:
+        section = remaining[:stop_match.start()]
+    else:
+        section = remaining
+    return section.strip()[:max_chars]
+
+
 def fetch_sec_text(session: Session, ticker: str, chart_id: str = None) -> dict:
     """
     Fetch SEC filing context for the given ticker.
 
     Strategy:
         1. If Bedrock KB available: semantic search for relevant sections
-        2. Fallback: SQL query for most recent extracted filing from Snowflake
+        2. Fallback: SQL query for extracted filings from RAW_SEC_FILING_DOCUMENTS
+        3. Final fallback: parse MD&A/Risk from full text in RAW_SEC_FILING_TEXT
     """
     # Try Bedrock KB RAG first
     kb_result = _fetch_sec_text_rag(ticker, chart_id=chart_id)
@@ -676,6 +720,32 @@ def fetch_sec_text(session: Session, ticker: str, chart_id: str = None) -> dict:
             }
     except Exception as e:
         logger.warning("Could not fetch SEC text for %s: %s", ticker, e)
+
+    # Final fallback: parse RAW_SEC_FILING_TEXT (populated by SECFilingLoader)
+    logger.info("Trying RAW_SEC_FILING_TEXT fallback for %s", ticker)
+    try:
+        fallback_sql = f"""
+            SELECT FILING_TEXT::STRING AS FILING_TEXT
+            FROM RAW.RAW_SEC_FILING_TEXT
+            WHERE TICKER = '{safe_ticker}'
+              AND FORM_TYPE IN ('10-K', '10-Q')
+              AND FILING_TEXT IS NOT NULL
+            ORDER BY FILING_DATE DESC
+            LIMIT 1
+        """
+        fb_rows = session.sql(fallback_sql).collect()
+        if fb_rows and fb_rows[0]["FILING_TEXT"]:
+            full_text = fb_rows[0]["FILING_TEXT"]
+            mda = _extract_section(full_text, "management's discussion and analysis")
+            risk = _extract_section(full_text, "risk factors")
+            if mda or risk:
+                logger.info(
+                    "Extracted from RAW_SEC_FILING_TEXT for %s: MD&A=%d chars, Risk=%d chars",
+                    ticker, len(mda), len(risk),
+                )
+                return {"mda_text": mda, "risk_text": risk}
+    except Exception as e:
+        logger.warning("RAW_SEC_FILING_TEXT fallback failed for %s: %s", ticker, e)
 
     return {"mda_text": "", "risk_text": ""}
 

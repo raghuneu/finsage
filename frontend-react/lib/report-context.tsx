@@ -93,13 +93,28 @@ export function ReportProvider({ children }: { children: ReactNode }) {
   // Existing reports state
   const [existingReports, setExistingReports] = useState<ExistingReport[]>([]);
   const [existingReportsLoading, setExistingReportsLoading] = useState(false);
+  const latestTickerRef = useRef<string | null>(null);
 
   const loadReportHistory = useCallback((ticker: string) => {
+    latestTickerRef.current = ticker;
     setExistingReportsLoading(true);
+    setExistingReports([]);
     fetchReportHistory(ticker)
-      .then((data: ExistingReport[]) => setExistingReports(data))
-      .catch(() => setExistingReports([]))
-      .finally(() => setExistingReportsLoading(false));
+      .then((data: ExistingReport[]) => {
+        if (latestTickerRef.current === ticker) {
+          setExistingReports(data);
+        }
+      })
+      .catch(() => {
+        if (latestTickerRef.current === ticker) {
+          setExistingReports([]);
+        }
+      })
+      .finally(() => {
+        if (latestTickerRef.current === ticker) {
+          setExistingReportsLoading(false);
+        }
+      });
   }, []);
 
   const startQuickReport = useCallback((ticker: string) => {

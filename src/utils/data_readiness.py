@@ -88,6 +88,7 @@ def check_raw_data_exists(session, ticker: str) -> dict:
         "news": "RAW.RAW_NEWS",
         "sec_text": "RAW.RAW_SEC_FILING_TEXT",
         "sec_xbrl": "RAW.RAW_SEC_FILINGS",
+        "sec_docs": "RAW.RAW_SEC_FILING_DOCUMENTS",
     }
 
     ticker = ticker.upper().strip()

@@ -52,10 +52,6 @@ export const fetchReportHistory = (ticker: string) =>
 export const fetchAvailableReportTickers = (): Promise<string[]> =>
   api.get(`/api/report/available-tickers`).then(r => r.data);
 
-// Chat
-export const askFinSage = (ticker: string, question: string): Promise<{ answer: string; missing_tickers?: string[]; error?: string }> =>
-  api.post(`/api/chat/ask`, { ticker, question }).then(r => r.data);
-
 // Observability
 export const fetchHealthChecks = () =>
   api.get(`/api/observability/health-checks`).then(r => r.data);
@@ -86,6 +82,9 @@ export const resetReportChat = (sessionId: string) =>
   api.post(`/api/report_chat/reset`, { session_id: sessionId }).then(r => r.data);
 
 // Meta
+export const fetchCompanyName = (ticker: string): Promise<{ ticker: string; company_name: string | null; valid: boolean }> =>
+  api.get(`/api/company-name`, { params: { ticker } }).then(r => r.data);
+
 export const fetchTickers = () =>
   api.get(`/api/tickers`).then(r => r.data);
 
