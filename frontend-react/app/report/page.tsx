@@ -58,7 +58,6 @@ export default function ReportPage() {
     setSkipCharts,
     startCAVM,
     existingReports,
-    existingReportsLoading,
     loadReportHistory,
   } = useReport();
 
@@ -98,24 +97,20 @@ export default function ReportPage() {
   const summaryReports = existingReports.filter((r: ExistingReport) => r.detail_level === 'summary');
   const fullReports = existingReports.filter((r: ExistingReport) => r.detail_level === 'full');
 
-  // Track which report folder the chat is grounded to
-  const [activeFolderName, setActiveFolderName] = useState<string | null>(null);
+  // Track which report folder the chat is grounded to (user click override only)
+  const [folderOverride, setFolderOverride] = useState<{ ticker: string; folder: string } | null>(null);
 
-  // Auto-set active folder when a CAVM run completes (use its output folder)
-  useEffect(() => {
-    if (cavmForTicker && cavm.result) {
-      const resultFolder = String((cavm.result as Record<string, unknown>).output_folder || '');
-      if (resultFolder) setActiveFolderName(resultFolder);
-    }
-  }, [cavmForTicker, cavm.result]);
+  // Derive CAVM output folder directly from result (no effect needed)
+  const cavmFolderName = cavmForTicker && cavm.result
+    ? String((cavm.result as Record<string, unknown>).output_folder || '') || null
+    : null;
 
-  // Reset active folder when ticker changes
-  useEffect(() => {
-    setActiveFolderName(null);
-  }, [ticker]);
+  // Ignore override if it belongs to a different ticker
+  const activeFolderName = folderOverride?.ticker === ticker ? folderOverride.folder : null;
 
-  // Determine the folder to use for chat: explicit selection > latest existing report
+  // Determine the folder to use for chat: user selection > CAVM result > latest existing report
   const chatFolderName = activeFolderName
+    || cavmFolderName
     || (reportType === 'cavm-summary' ? summaryReports[0]?.folder_name : fullReports[0]?.folder_name)
     || existingReports[0]?.folder_name
     || undefined;
@@ -259,7 +254,7 @@ export default function ReportPage() {
                     startIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
                     href={`${apiBase}/api/report/download/${encodeURIComponent(summaryReports[0].pdf_path)}`}
                     target="_blank"
-                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveFolderName(summaryReports[0].folder_name); }}
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); setFolderOverride({ ticker, folder: summaryReports[0].folder_name }); }}
                     sx={{
                       fontSize: '0.7rem', py: 0.25, px: 1,
                       borderColor: 'rgba(3,130,183,0.3)', color: '#0382B7',
@@ -316,7 +311,7 @@ export default function ReportPage() {
                     startIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
                     href={`${apiBase}/api/report/download/${encodeURIComponent(fullReports[0].pdf_path)}`}
                     target="_blank"
-                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveFolderName(fullReports[0].folder_name); }}
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); setFolderOverride({ ticker, folder: fullReports[0].folder_name }); }}
                     sx={{
                       fontSize: '0.7rem', py: 0.25, px: 1,
                       borderColor: 'rgba(3,130,183,0.3)', color: '#0382B7',
