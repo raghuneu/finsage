@@ -1,0 +1,16 @@
+# Airflow container additional dependencies
+# Currently installed via _PIP_ADDITIONAL_REQUIREMENTS in docker-compose.yaml
+# For production: use this file with a custom Dockerfile instead of inline installs
+#   COPY requirements.txt .
+#   RUN pip install --no-cache-dir -r requirements.txt
+
+yfinance
+newsapi-python
+snowflake-snowpark-python
+pandas
+requests
+python-dotenv
+boto3
+beautifulsoup4
+httpx
+dbt-snowflake
