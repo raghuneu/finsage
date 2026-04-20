@@ -1,0 +1,41 @@
+# ── Snowflake ────────────────────────────────
+snowflake-snowpark-python>=1.11.0
+snowflake-connector-python[pandas]>=3.6.0
+
+# ── Web Framework ───────────────────────────
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# ── Data Sources ─────────────────────────────
+yfinance>=0.2.36
+requests>=2.31.0
+httpx>=0.27.0
+beautifulsoup4>=4.12.0
+
+# ── Data Processing ──────────────────────────
+pandas>=2.1.0
+numpy>=1.26.0
+python-dateutil>=2.8.0
+
+# ── Configuration ────────────────────────────
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# ── AWS ──────────────────────────────────────
+boto3>=1.34.0
+
+# ── Retry Logic ──────────────────────────────
+tenacity>=8.2.0
+
+# ── Charts + PDF ─────────────────────────────
+matplotlib>=3.8.0
+reportlab>=4.1.0
+Pillow>=10.0.0
+
+# ── LLM / AI ────────────────────────────────
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-core>=0.3.0
+
+# ── Logging ──────────────────────────────────
+colorlog>=6.8.0

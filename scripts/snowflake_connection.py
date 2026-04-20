@@ -31,19 +31,32 @@ def _build_connection_params() -> dict:
             f"Check your .env file."
         )
 
-    token = os.getenv("SNOWFLAKE_TOKEN")
-
-    if token:
-        connection_params["authenticator"] = "programmatic_access_token"
-        connection_params["token"] = token
+    # Auth priority:
+    #   1. SPCS auto-injected OAuth token (via /snowflake/session/token)
+    #   2. Programmatic Access Token (SNOWFLAKE_TOKEN env var)
+    #   3. Password (SNOWFLAKE_PASSWORD)
+    snowflake_host = os.getenv("SNOWFLAKE_HOST")
+    if snowflake_host:
+        # Running inside Snowpark Container Services
+        token_path = "/snowflake/session/token"
+        with open(token_path) as f:
+            spcs_token = f.read().strip()
+        connection_params["host"] = snowflake_host
+        connection_params["authenticator"] = "oauth"
+        connection_params["token"] = spcs_token
     else:
-        password = os.getenv("SNOWFLAKE_PASSWORD")
-        if not password:
-            raise ValueError(
-                "Neither SNOWFLAKE_TOKEN nor SNOWFLAKE_PASSWORD is set. "
-                "Check your .env file."
-            )
-        connection_params["password"] = password
+        token = os.getenv("SNOWFLAKE_TOKEN")
+        if token:
+            connection_params["authenticator"] = "programmatic_access_token"
+            connection_params["token"] = token
+        else:
+            password = os.getenv("SNOWFLAKE_PASSWORD")
+            if not password:
+                raise ValueError(
+                    "Neither SNOWFLAKE_TOKEN nor SNOWFLAKE_PASSWORD is set. "
+                    "Check your .env file."
+                )
+            connection_params["password"] = password
 
     return connection_params
 
