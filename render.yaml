@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: finsage-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    plan: free
+    envVars:
+      - key: SNOWFLAKE_ACCOUNT
+        sync: false
+      - key: SNOWFLAKE_USER
+        sync: false
+      - key: SNOWFLAKE_PASSWORD
+        sync: false
+      - key: SNOWFLAKE_DATABASE
+        value: FINSAGE_DB
+      - key: SNOWFLAKE_SCHEMA
+        value: RAW
+      - key: SNOWFLAKE_WAREHOUSE
+        value: FINSAGE_WH
+      - key: SNOWFLAKE_ROLE
+        value: TRAINING_ROLE
+      - key: FRONTEND_URL
+        sync: false

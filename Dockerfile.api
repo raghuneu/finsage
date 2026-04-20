@@ -1,0 +1,31 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# System deps for Snowflake connector native extensions
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (trimmed — no dbt/pytest/sqlalchemy)
+COPY requirements-api.txt ./requirements-api.txt
+RUN pip install --no-cache-dir --timeout 300 -r requirements-api.txt
+
+# Copy application code
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY agents/ ./agents/
+COPY config/ ./config/
+COPY frontend-react/api/ ./frontend-react/api/
+
+# Create outputs directory for generated reports
+RUN mkdir -p /app/outputs
+
+# Non-root user
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+WORKDIR /app/frontend-react/api
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
