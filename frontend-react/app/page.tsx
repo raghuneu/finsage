@@ -12,6 +12,7 @@ import {
   ListItem,
   ListItemText,
   Alert,
+  Link as MuiLink,
 } from '@mui/material';
 import CircleIcon from '@mui/icons-material/Circle';
 import { useTicker } from '@/lib/ticker-context';
@@ -22,6 +23,7 @@ import SectionHeader from '@/components/SectionHeader';
 import PriceChart from '@/components/PriceChart';
 import { DashboardSkeleton } from '@/components/LoadingSkeleton';
 import { getSignalColor } from '@/lib/signal-colors';
+import NextLink from 'next/link';
 
 function fmtMoney(val: number | null | undefined): string {
   if (val == null) return 'N/A';
@@ -67,6 +69,13 @@ export default function DashboardPage() {
   const sentiment = (kpis.sentiment || {}) as Record<string, unknown>;
   const secFin = (kpis.sec_financials || {}) as Record<string, unknown>;
 
+  const hasNoData =
+    Object.keys(profile).length === 0 &&
+    Object.keys(stock).length === 0 &&
+    Object.keys(fundamentals).length === 0 &&
+    Object.keys(sentiment).length === 0 &&
+    Object.keys(secFin).length === 0;
+
   const signals = [
     { label: 'Stock Trend', signal: stock.trend_signal as string },
     { label: 'Fundamentals', signal: fundamentals.fundamental_signal as string },
@@ -82,6 +91,15 @@ export default function DashboardPage() {
 
   return (
     <Box>
+      {hasNoData && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          No data available for <strong>{ticker}</strong>. To load data for this ticker, head to the{' '}
+          <MuiLink component={NextLink} href="/report" underline="always" sx={{ fontWeight: 600 }}>
+            Report page
+          </MuiLink>{' '}
+          and generate a report — data will be loaded automatically.
+        </Alert>
+      )}
       {/* KPI Cards */}
       <SectionHeader title="Key Metrics" subtitle="Latest data from the analytics layer" accentColor={getSignalColor(stock.trend_signal as string)} />
       <Grid container spacing={2} sx={{ mb: 3 }}>

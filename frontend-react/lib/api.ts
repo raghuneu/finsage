@@ -88,5 +88,8 @@ export const fetchCompanyName = (ticker: string): Promise<{ ticker: string; comp
 export const fetchTickers = () =>
   api.get(`/api/tickers`).then(r => r.data);
 
+export const fetchCompanyName = (ticker: string): Promise<{ ticker: string; name: string | null; valid: boolean }> =>
+  api.get(`/api/company-name`, { params: { ticker } }).then(r => r.data);
+
 export const fetchHealth = () =>
   api.get(`/api/health`).then(r => r.data);

@@ -139,7 +139,7 @@ Scheduled daily at 5 PM EST. Tasks: 4 parallel data fetches → `run_dbt_transfo
 ## Tech Stack
 
 - **Python 3.9** with virtual environment (`venv/`)
-- **Snowflake** (SFEDU02 academic account) — warehouse, Cortex LLM/VLM (claude-sonnet-4-6, mistral-large), Cortex Search, Cortex SUMMARIZE
+- **Snowflake** (SFEDU02 academic account) — warehouse, Cortex LLM/VLM (claude-opus-4, claude-sonnet-4), Cortex Search, Cortex SUMMARIZE
 - **AWS Bedrock** — Knowledge Base RAG (Llama 3), Guardrails (content safety/grounding), multi-model inference (Llama3, Titan, Mistral, Claude)
 - **AWS S3** — SEC filing document storage (`finsage-sec-filings-808683`)
 - **dbt 1.7** for SQL transformations

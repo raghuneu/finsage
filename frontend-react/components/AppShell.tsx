@@ -107,6 +107,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </Typography>
         <Autocomplete
           freeSolo
+          autoSelect
           value={ticker}
           onChange={(_, v) => v && setTicker(v as string)}
           options={tickers}

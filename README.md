@@ -1,18 +1,47 @@
+<div align="center">
+
 # FinSage
 
 **AI-Powered Financial Research Report Generator**
 
+<h3><a href="https://teamfinsage.vercel.app/">https://teamfinsage.vercel.app</a></h3>
+
+[![Python](https://img.shields.io/badge/Python-3.9-3776AB?style=flat-square&logo=python&logoColor=white)](#)
+[![Snowflake](https://img.shields.io/badge/Snowflake-Cortex_AI-29B5E8?style=flat-square&logo=snowflake&logoColor=white)](#)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](#)
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js&logoColor=white)](#)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=flat-square&logo=fastapi&logoColor=white)](#)
+[![dbt](https://img.shields.io/badge/dbt-1.7-FF694B?style=flat-square&logo=dbt&logoColor=white)](#)
+[![Airflow](https://img.shields.io/badge/Airflow-2.8-017CEE?style=flat-square&logo=apache-airflow&logoColor=white)](#)
+[![AWS](https://img.shields.io/badge/AWS-Bedrock-FF9900?style=flat-square&logo=amazon-aws&logoColor=white)](#)
+
+*Built for DAMG 7374 -- Gen AI with Applications in Data Engineering (Northeastern University, Spring 2026)*
+
+**Raghu Ram Shanta Rajamani** -- [shantharajamani.r@northeastern.edu](mailto:shantharajamani.r@northeastern.edu)
+**Ojas Misra** -- [misra.o@northeastern.edu](mailto:misra.o@northeastern.edu)
+**Shrirangesh Vedanarayanan** -- [vedanarayanan.s@northeastern.edu](mailto:vedanarayanan.s@northeastern.edu)
+
+[What It Does](#what-it-does) · [The Stack](#the-stack) · [Architecture](#architecture) · [Frontend Pages](#frontend-pages) · [Features](#features) · [Getting Started](#getting-started) · [Project Structure](#project-structure) · [Output](#output) · [Tickers](#tickers)
+
+</div>
+
+<div align="center">
+
 You want to research **AAPL**. You have **two hours**, not two weeks. Analyst reports cost thousands. Free summaries are too shallow to trust. So what do you actually do?
 
-FinSage generates 15--20 page professional financial research reports -- with charts, SEC filing analysis, and citations -- in under 7 minutes. It pulls data from 5 sources, runs it through a 4-agent AI pipeline, and delivers a branded PDF with written analysis for any of 50 tracked U.S. public companies.
+FinSage generates 15--20 page professional financial research reports -- with charts, SEC filing analysis, and citations -- in under 7 minutes. It pulls data from 5 sources, runs it through a 4-agent AI pipeline, and delivers a branded PDF with written analysis for any U.S. public company. 50 tickers come pre-loaded; type any valid ticker and FinSage fetches the data on demand.
 
-> Built for DAMG 7374 -- Data Engineering: Impact of Generative AI with LLMs (Northeastern University, Spring 2026)
+</div>
+
+<p align="center">
+  <img src="docs/screenshots/Dashboard.png" alt="Dashboard" width="90%"/>
+</p>
 
 ---
 
-## What It Does
+<h2 align="center">What It Does</h2>
 
-| Step | What happens | Time |
+| Step | What Happens | Time |
 |------|-------------|------|
 | **1. Fetch & Stage** | Pulls prices, news, 10-K filings, and fundamentals into Snowflake. dbt cleans and promotes to analytics tables. | ~1:30 |
 | **2. Chart Agent** | Generates 8 matplotlib charts from analytics data. Each chart goes through a 3-iteration AI vision critique loop until quality passes. | ~2:00 |
@@ -20,50 +49,36 @@ FinSage generates 15--20 page professional financial research reports -- with ch
 | **4. Analysis** | Per-chart written analysis tied to the underlying numbers. SEC MD&A and Risk Factors summarized via Cortex. | ~1:30 |
 | **5. PDF Assembly** | Branded 15--20 page report with executive summary, all charts, analysis sections, and a Q&A chatbot. | ~0:45 |
 
-**Total: ~7 minutes end-to-end.**
+<p align="center"><strong>Total: ~7 minutes end-to-end.</strong></p>
+
+<p align="center">
+  <img src="docs/screenshots/report_pipeline.png" alt="Report Pipeline" width="90%"/>
+</p>
 
 ---
 
-## The Stack
+<h2 align="center">The Stack</h2>
 
-```
-REACT FRONTEND (Next.js 16 + MUI 9)
-     |
-     | Axios / REST
-     v
-FastAPI BACKEND (Python)
-     |
-     +---> Snowflake (Data Warehouse + Cortex LLM/VLM)
-     +---> AWS Bedrock (Knowledge Base RAG + Guardrails)
-     +---> CAVM Pipeline (4-Agent Report Generation)
-     |
-DATA SOURCES: Yahoo Finance | NewsAPI | Alpha Vantage | SEC EDGAR
-     |
-     v
-RAW LAYER --[dbt]--> STAGING LAYER --[dbt]--> ANALYTICS LAYER
-(6 tables)           (5 views)                 (6 tables)
-```
-
-### Data Engineering
+<h3 align="center">Data Engineering</h3>
 
 - **Snowflake** -- Cloud data warehouse, Cortex LLM/VLM (`claude-sonnet-4-6`, `mistral-large`), Cortex SUMMARIZE, Cortex SENTIMENT
 - **dbt 1.7** -- 5 staging views + 6 analytics tables with automated tests
 - **Apache Airflow 2.8** -- Daily scheduled DAG (Docker Compose, CeleryExecutor)
 - **Snowpark Python** -- In-warehouse Python execution
 
-### AI / Models
+<h3 align="center">AI / Models</h3>
 
 - **Snowflake Cortex** -- `claude-sonnet-4-6` VLM for chart critique, `mistral-large` for analysis, SUMMARIZE for SEC filings, SENTIMENT for news
 - **AWS Bedrock** -- Knowledge Base RAG (Llama 3 with citations), Guardrails (investment-advice denial, PII redaction, contextual grounding), multi-model inference (Llama3, Titan, Mistral, Claude)
 
-### Frontend
+<h3 align="center">Frontend</h3>
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
 - **MUI 9** (Material UI) with custom theme
 - **Recharts** (statistical charts) + **lightweight-charts** (candlestick/volume)
 - **FastAPI** backend connecting React to Snowflake
 
-### Infrastructure
+<h3 align="center">Infrastructure</h3>
 
 - **Terraform** -- AWS S3 infrastructure as code
 - **Docker Compose** -- Airflow orchestration stack
@@ -71,11 +86,39 @@ RAW LAYER --[dbt]--> STAGING LAYER --[dbt]--> ANALYTICS LAYER
 
 ---
 
-## Features
+<h2 align="center">Architecture</h2>
+
+<p align="center">
+  <img src="docs/screenshots/architecture.png" alt="Architecture" width="90%"/>
+</p>
+
+<h3 align="center">CAVM Pipeline (Multi-Agent Report Generation)</h3>
+
+| Agent | Role | Technology |
+|-------|------|-----------|
+| **01 -- Chart** | Generates 8 matplotlib charts from analytics tables. 3-iteration VLM refinement: initial draw --> AI critique --> redraw --> final. | `claude-opus-4-6` (Cortex LLM) + `claude-sonnet-4-6` (Cortex VLM) + matplotlib |
+| **02 -- Validation** | Independently verifies visual quality and data integrity of every chart. Aborts if >2 charts fail. Auto-retries up to 3x. | `claude-sonnet-4-6` (Cortex VLM) |
+| **03 -- Analysis** | Writes per-chart analysis tied to underlying numbers. Summarizes SEC MD&A and Risk Factors via Cortex SUMMARIZE. | `claude-opus-4-6` (Cortex LLM) + Cortex SUMMARIZE |
+| **04 -- Report** | Assembles branded PDF: navy header, teal accents, gold highlights, color-coded signals. 15--20 pages. | `claude-opus-4-6` (Cortex LLM) + reportlab |
+
+---
+
+<h2 align="center">Frontend Pages</h2>
+
+| Route | Page | What It Does |
+|-------|------|-------------|
+| `/` | Dashboard | KPI cards, signal badges, interactive candlestick chart with SMA overlays and volume, news headlines |
+| `/analytics` | Analytics Explorer | 4-tab interface: Stock Metrics, Fundamentals, Sentiment, SEC Financials with interactive charts |
+| `/sec` | SEC Filings | Filing inventory table, timeline visualization, 4 Cortex analysis modes (Summary, Risk, MD&A, Cross-Company) |
+| `/report` | Report Generation | Quick Report (Cortex LLM markdown) and Full CAVM Pipeline with live 4-stage stepper and PDF download |
+
+---
+
+<h2 align="center">Features</h2>
 
 | Feature | Details |
 |---------|---------|
-| 50-ticker data pipeline | Idempotent MERGE loading, quality scoring (0--100), incremental fetch, retry with exponential backoff |
+| Data pipeline + on-demand loading | 50 pre-loaded tickers via Airflow. Any valid U.S. ticker works on demand -- FinSage auto-fetches prices, fundamentals, news, and SEC filings before report generation. Idempotent MERGE, quality scoring (0--100), incremental fetch, retry with exponential backoff. |
 | Three-layer Snowflake architecture | RAW (ingestion) --> STAGING (dbt views, cleaning) --> ANALYTICS (dbt tables, tested) |
 | CAVM multi-agent report generation | Chart Agent --> Validation Agent --> Analysis Agent --> Report Agent, with VLM refinement loop |
 | Vision-enhanced chart refinement | 3-iteration critique loop: Cortex `claude-sonnet-4-6` evaluates each chart, suggests improvements, chart is regenerated |
@@ -88,44 +131,7 @@ RAW LAYER --[dbt]--> STAGING LAYER --[dbt]--> ANALYTICS LAYER
 
 ---
 
-## Architecture
-
-### Three-Layer Data Warehouse
-
-```
-Yahoo Finance ─┐
-Alpha Vantage ─┤
-NewsAPI ───────┤──> RAW LAYER ──[dbt views]──> STAGING ──[dbt tables]──> ANALYTICS
-SEC EDGAR ─────┤    (Snowflake)                                          dim_company
-XBRL filings ──┘    Idempotent MERGE                                     dim_date
-                     Quality score 0-100                                  fct_stock_metrics
-                                                                          fct_fundamentals_growth
-                                                                          fct_news_sentiment_agg
-                                                                          fct_sec_financial_summary
-```
-
-### CAVM Pipeline (Multi-Agent Report Generation)
-
-| Agent | Role | Technology |
-|-------|------|-----------|
-| **01 -- Chart** | Generates 8 matplotlib charts from analytics tables. 3-iteration VLM refinement: initial draw --> AI critique --> redraw --> final. | `claude-sonnet-4-6` (Cortex VLM) + matplotlib |
-| **02 -- Validation** | Independently verifies visual quality and data integrity of every chart. Aborts if >2 charts fail. Auto-retries up to 3x. | Cortex VLM |
-| **03 -- Analysis** | Writes per-chart analysis tied to underlying numbers. Summarizes SEC MD&A and Risk Factors via Cortex SUMMARIZE. | `mistral-large` (Cortex LLM) + Cortex SUMMARIZE |
-| **04 -- Report** | Assembles branded PDF: navy header, teal accents, gold highlights, color-coded signals. 15--20 pages. | reportlab |
-
-### Frontend Pages
-
-| Route | Page | What it does |
-|-------|------|-------------|
-| `/` | Dashboard | KPI cards, signal badges, interactive candlestick chart with SMA overlays and volume, news headlines |
-| `/analytics` | Analytics Explorer | 4-tab interface: Stock Metrics, Fundamentals, Sentiment, SEC Financials with interactive charts |
-| `/sec` | SEC Filings | Filing inventory table, timeline visualization, 4 Cortex analysis modes (Summary, Risk, MD&A, Cross-Company) |
-| `/report` | Report Generation | Quick Report (Cortex LLM markdown) and Full CAVM Pipeline with live 4-stage stepper and PDF download |
-| `/ask` | Ask FinSage | Chat interface powered by Snowflake Cortex with suggested questions and source citations |
-
----
-
-## Quick Start
+<h2 align="center">Getting Started</h2>
 
 ### Prerequisites
 
@@ -196,7 +202,7 @@ docker-compose up -d    # starts webserver, scheduler, worker
 
 ---
 
-## Project Structure
+<h2 align="center">Project Structure</h2>
 
 ```
 finsage-project/
@@ -220,15 +226,16 @@ finsage-project/
 ├── airflow/                    # Docker Compose Airflow stack + DAG
 ├── sql/                        # DDL migrations (01-08)
 ├── terraform/s3/               # AWS S3 infrastructure as code
-├── config/tickers.yaml         # 50 tracked tickers (5 sectors)
+├── config/tickers.yaml         # 50 pre-loaded tickers (custom tickers loaded on demand)
 ├── tests/                      # pytest suite
+├── docs/screenshots/           # Application screenshots
 ├── outputs/                    # Generated reports
 └── requirements.txt            # Python dependencies
 ```
 
 ---
 
-## Output
+<h2 align="center">Output</h2>
 
 Reports are saved to `outputs/<TICKER>_<YYYYMMDD>_<HHMMSS>/` and include:
 
@@ -238,11 +245,17 @@ Reports are saved to `outputs/<TICKER>_<YYYYMMDD>_<HHMMSS>/` and include:
 - **`pipeline_result.json`**: Full execution log
 - **Final branded PDF**: 15--20 pages, Midnight Teal theme
 
+<p align="center">
+  <img src="docs/screenshots/generated_report.png" alt="Generated Report" width="90%"/>
+</p>
+
 ---
 
-## Tracked Tickers (50)
+<h2 align="center">Tickers</h2>
 
-Across 5 sectors:
+<p align="center">50 tickers come pre-loaded across 5 sectors via Airflow. Enter any valid U.S. stock ticker in the UI and FinSage will automatically fetch prices, fundamentals, news, and SEC filings on demand.</p>
+
+<h3 align="center">Pre-loaded Tickers</h3>
 
 | Sector | Tickers |
 |--------|---------|
@@ -254,16 +267,7 @@ Across 5 sectors:
 
 ---
 
-## Team
-
-Graduate students at Northeastern University
-**Course:** DAMG 7374 -- Data Engineering: Impact of Generative AI with LLMs
-
-- **Raghu Ram Shanta Rajamani** -- [shantharajamani.r@northeastern.edu](mailto:shantharajamani.r@northeastern.edu)
-- **Ojas Misra** -- [misra.o@northeastern.edu](mailto:misra.o@northeastern.edu)
-- **Shrirangesh Vedanarayanan** -- [vedanarayanan.s@northeastern.edu](mailto:vedanarayanan.s@northeastern.edu)
-
----
+<div align="center">
 
 ## License
 
@@ -272,3 +276,5 @@ MIT License
 ---
 
 *This is an academic project demonstrating modern data engineering practices with LLMs. Not intended for actual investment decisions.*
+
+</div>
