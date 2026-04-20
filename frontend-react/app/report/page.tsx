@@ -131,7 +131,7 @@ export default function ReportPage() {
     } catch { return isoDate; }
   };
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 
   return (
     <Box>
