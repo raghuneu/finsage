@@ -23,8 +23,8 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ArticleIcon from '@mui/icons-material/Article';
-import ChatIcon from '@mui/icons-material/Chat';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useTicker } from '@/lib/ticker-context';
 import { getCompanyName } from '@/lib/company-names';
@@ -36,21 +36,20 @@ const NAV_ITEMS = [
   { label: 'Analytics', path: '/analytics', icon: <BarChartIcon /> },
   { label: 'SEC Filings', path: '/sec', icon: <DescriptionIcon /> },
   { label: 'Report', path: '/report', icon: <ArticleIcon /> },
-  { label: 'Ask FinSage', path: '/ask', icon: <ChatIcon /> },
   { label: 'Observability', path: '/observability', icon: <MonitorHeartIcon /> },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { ticker, setTicker, tickers } = useTicker();
+  const { ticker, setTicker, tickers, companyName, validating, invalidTicker } = useTicker();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const currentPage = NAV_ITEMS.find(
     (item) => pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path))
-  );
+  ) || (pathname.startsWith('/architecture') ? { label: 'Architecture', path: '/architecture', icon: <AccountTreeIcon /> } : undefined);
 
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -143,7 +142,34 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             />
           )}
         />
-        {getCompanyName(ticker) && (
+        {validating && (
+          <Typography
+            sx={{
+              mt: 0.5,
+              fontSize: '0.6rem',
+              color: '#0382B7',
+              lineHeight: 1.2,
+              px: 0.5,
+            }}
+          >
+            Validating ticker...
+          </Typography>
+        )}
+        {invalidTicker && (
+          <Typography
+            sx={{
+              mt: 0.5,
+              fontSize: '0.6rem',
+              color: '#ef476f',
+              fontWeight: 600,
+              lineHeight: 1.2,
+              px: 0.5,
+            }}
+          >
+            {invalidTicker} is not a valid ticker
+          </Typography>
+        )}
+        {!validating && !invalidTicker && companyName && (
           <Typography
             sx={{
               mt: 0.5,
@@ -153,7 +179,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               px: 0.5,
             }}
           >
-            {getCompanyName(ticker)}
+            {companyName}
           </Typography>
         )}
       </Box>
@@ -161,7 +187,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <Divider />
 
       {/* Navigation */}
-      <List sx={{ flexGrow: 1, px: 1, py: 1.5 }}>
+      <List sx={{ px: 1, py: 1.5 }}>
         {NAV_ITEMS.map((item) => {
           const isActive =
             pathname === item.path ||
@@ -213,13 +239,79 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         })}
       </List>
 
+      {/* Spacer pushes Architecture + Footer to bottom */}
+      <Box sx={{ flexGrow: 1 }} />
+
+      {/* Architecture — pinned above footer */}
+      <Box sx={{ px: 1, pb: 0.5 }}>
+        {(() => {
+          const isActive = pathname.startsWith('/architecture');
+          return (
+            <ListItemButton
+              onClick={() => {
+                router.push('/architecture');
+                if (isMobile) setMobileOpen(false);
+              }}
+              sx={{
+                borderRadius: 1.5,
+                py: 0.75,
+                backgroundColor: isActive ? 'rgba(0,0,0,0.06)' : 'transparent',
+                borderLeft: isActive ? '3px solid #03B792' : '3px solid transparent',
+                '&:hover': {
+                  backgroundColor: isActive
+                    ? 'rgba(0,0,0,0.06)'
+                    : 'rgba(0,0,0,0.03)',
+                },
+              }}
+            >
+              <ListItemIcon
+                sx={{
+                  minWidth: 34,
+                  color: isActive ? '#2C2A25' : '#6B7280',
+                  '& .MuiSvgIcon-root': { fontSize: '1.15rem' },
+                }}
+              >
+                <AccountTreeIcon />
+              </ListItemIcon>
+              <ListItemText
+                primary="Architecture"
+                slotProps={{
+                  primary: {
+                    sx: {
+                      fontSize: '0.82rem',
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? '#2C2A25' : '#6B7280',
+                      letterSpacing: '0.01em',
+                    },
+                  },
+                }}
+              />
+            </ListItemButton>
+          );
+        })()}
+      </Box>
+
       <Divider />
 
       {/* Footer */}
-      <Box sx={{ p: 2 }}>
-        <Typography variant="caption" sx={{ color: '#C4BFB5', fontSize: '0.58rem' }}>
-          DAMG 7374 &middot; Fin<Box component="span" sx={{ backgroundColor: 'rgba(6, 214, 160, 0.12)', borderRadius: '4px', px: 0.4 }}>Sage</Box> v2.0
+      <Box sx={{ px: 2, py: 1.5 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            color: '#6B6760',
+            textTransform: 'uppercase',
+            letterSpacing: '0.12em',
+            fontSize: '0.55rem',
+            fontWeight: 600,
+          }}
+        >
+          Built by FinSage Team
         </Typography>
+        <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
+          <a href="https://www.linkedin.com/in/srraghuram/" target="_blank" rel="noopener noreferrer" style={{ color: '#6B7280', textDecoration: 'none', fontSize: '0.6rem' }}>Raghu</a>
+          <a href="https://www.linkedin.com/in/shrirangesh-v26/" target="_blank" rel="noopener noreferrer" style={{ color: '#6B7280', textDecoration: 'none', fontSize: '0.6rem' }}>Rangesh</a>
+          <a href="https://www.linkedin.com/in/ojas-misra/" target="_blank" rel="noopener noreferrer" style={{ color: '#6B7280', textDecoration: 'none', fontSize: '0.6rem' }}>Ojas</a>
+        </Box>
       </Box>
     </Box>
   );
@@ -280,7 +372,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {ticker}
                 </Typography>
               </Box>
-              {getCompanyName(ticker) && (
+              {companyName && (
                 <Typography
                   sx={{
                     color: '#6B6760',
@@ -292,7 +384,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {getCompanyName(ticker)}
+                  {companyName}
                 </Typography>
               )}
             </Box>
@@ -330,7 +422,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }}
       >
         {/* Page header */}
-        {currentPage && (
+        {currentPage && pathname !== '/architecture' && (
           <Box sx={{ mb: 3, display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
             <Typography
               variant="h4"
@@ -361,7 +453,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 {ticker}
               </Typography>
             </Box>
-            {getCompanyName(ticker) && (
+            {companyName && (
               <Typography
                 sx={{
                   color: '#6B6760',
@@ -370,7 +462,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {getCompanyName(ticker)}
+                {companyName}
               </Typography>
             )}
           </Box>

@@ -20,14 +20,21 @@ class XBRLLoader(BaseDataLoader):
     """Load structured XBRL financial data from SEC EDGAR into RAW_SEC_FILINGS"""
 
     KEY_CONCEPTS = [
+        # Revenue — companies report under different taxonomy concepts
         'Revenues',
         'RevenueFromContractWithCustomerExcludingAssessedTax',
+        'SalesRevenueNet',                  # legacy concept used by AAPL, WMT, HD, etc.
+        'SalesRevenueGoodsNet',             # retail / manufacturing companies
+        'RevenuesNetOfInterestExpense',     # banks: GS, JPM, BAC, C, MS, WFC
+        # Income & EPS
         'NetIncomeLoss',
         'EarningsPerShareBasic',
         'EarningsPerShareDiluted',
+        # Balance sheet
         'Assets',
         'Liabilities',
         'StockholdersEquity',
+        # Operations
         'OperatingIncomeLoss',
         'GrossProfit',
         'CashAndCashEquivalentsAtCarryingValue',
@@ -107,12 +114,19 @@ class XBRLLoader(BaseDataLoader):
             self.logger.error(f"CIK not found for {ticker}")
             return pd.DataFrame()
 
-        # Incremental: skip records already loaded
-        last_date = None
+        # Incremental: per-concept watermarks so newly-added concepts
+        # aren't skipped by a global ticker-level watermark.
+        concept_watermarks: dict[str, str] = {}
         try:
-            last_date = self.sf_client.get_last_loaded_date(
-                'RAW.RAW_SEC_FILINGS', ticker, 'FILED_DATE'
-            )
+            rows = self.sf_client.session.sql(f"""
+                SELECT CONCEPT, MAX(FILED_DATE) AS LAST_DATE
+                FROM RAW.RAW_SEC_FILINGS
+                WHERE TICKER = '{ticker}'
+                GROUP BY CONCEPT
+            """).collect()
+            for row in rows:
+                if row['LAST_DATE']:
+                    concept_watermarks[row['CONCEPT']] = str(row['LAST_DATE'])
         except Exception:
             pass  # Table may not exist yet
 
@@ -128,17 +142,30 @@ class XBRLLoader(BaseDataLoader):
         records = []
         us_gaap = data.get('facts', {}).get('us-gaap', {})
 
+        # EPS concepts are reported in USD/shares, not USD
+        EPS_CONCEPTS = {
+            'EarningsPerShareBasic',
+            'EarningsPerShareDiluted',
+        }
+
         for concept in self.KEY_CONCEPTS:
             if concept not in us_gaap:
                 continue
 
             concept_data = us_gaap[concept]
             label = concept_data.get('label', concept)
-            entries = concept_data.get('units', {}).get('USD', [])
+
+            # Pick correct unit key based on concept type
+            unit_key = 'USD/shares' if concept in EPS_CONCEPTS else 'USD'
+            entries = concept_data.get('units', {}).get(unit_key, [])
+
+            # Per-concept watermark: only skip entries for concepts
+            # that already have data loaded
+            last_date = concept_watermarks.get(concept)
 
             for entry in entries:
-                # Incremental: skip already-loaded records
-                if last_date and entry.get('filed', '') <= str(last_date):
+                # Incremental: skip already-loaded records for THIS concept
+                if last_date and entry.get('filed', '') <= last_date:
                     continue
 
                 # Only quarterly and annual filings
@@ -152,7 +179,7 @@ class XBRLLoader(BaseDataLoader):
                     'period_start': entry.get('start'),
                     'period_end': entry.get('end'),
                     'value': entry.get('val'),
-                    'unit': 'USD',
+                    'unit': unit_key,
                     'fiscal_year': entry.get('fy'),
                     'fiscal_period': entry.get('fp'),
                     'form_type': entry.get('form'),

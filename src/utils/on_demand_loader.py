@@ -21,7 +21,7 @@ def ensure_data_for_ticker(
     session=None,
     include_news: bool = True,
     include_sec: bool = True,
-    include_s3_filings: bool = False,
+    include_s3_filings: bool = True,
     run_dbt: bool = True,
     progress_callback: Optional[callable] = None,
 ) -> dict:
@@ -41,7 +41,10 @@ def ensure_data_for_ticker(
                  If None, a temporary session is created.
         include_news: Whether to load news data if missing.
         include_sec: Whether to load SEC filing data if missing.
-        include_s3_filings: Whether to run the S3 filing pipeline.
+        include_s3_filings: Whether to run the S3 filing pipeline
+                     (download from EDGAR → S3 → extract MD&A/Risk text).
+                     Defaults to True. Degrades gracefully if AWS creds
+                     are missing.
         run_dbt: Whether to run dbt after RAW loading.
         progress_callback: Optional ``fn(stage: str, detail: str)`` for
             live UI updates.
@@ -97,11 +100,17 @@ def ensure_data_for_ticker(
         # we only need dbt, not a fresh API fetch.
         raw_has_stock = raw_counts.get("stock", 0) > 0
         raw_has_fund = raw_counts.get("fundamentals", 0) > 0
+        raw_has_sec_docs = raw_counts.get("sec_docs", 0) > 0
+
+        # Skip S3 filing pipeline if docs already exist in RAW
+        actually_load_s3 = include_s3_filings and not raw_has_sec_docs
+
         need_api_fetch = (
             (load_stocks and not raw_has_stock)
             or (load_fundamentals and not raw_has_fund)
             or load_news
             or load_sec
+            or actually_load_s3
         )
 
         loaded = []
@@ -119,7 +128,7 @@ def ensure_data_for_ticker(
                 load_news=load_news,
                 load_sec=load_sec,
                 load_xbrl=load_sec,
-                load_s3_filings=include_s3_filings,
+                load_s3_filings=actually_load_s3,
                 run_dbt=False,  # we'll run dbt separately below
             )
 

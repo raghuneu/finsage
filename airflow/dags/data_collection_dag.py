@@ -32,8 +32,15 @@ BATCH_DELAYS = {
     'news': 30,      # NewsAPI: 5 req/min — need longer pauses between batches
     'default': 5,    # yfinance, SEC EDGAR — shorter courtesy delay
 }
-# Minimum ticker coverage required for loader gate to pass (50%)
-MIN_TICKER_COVERAGE = 25
+# Per-table minimum ticker coverage for the loader gate.
+# SEC filings are sparse (companies file quarterly), so we use a 7-day lookback
+# window instead of daily, while keeping daily checks for the other sources.
+MIN_TICKER_COVERAGE = {
+    'RAW.RAW_STOCK_PRICES':  {'min_tickers': 25, 'lookback_days': 0},
+    'RAW.RAW_FUNDAMENTALS':  {'min_tickers': 25, 'lookback_days': 0},
+    'RAW.RAW_NEWS':          {'min_tickers': 15, 'lookback_days': 0},
+    'RAW.RAW_SEC_FILINGS':   {'min_tickers': 25, 'lookback_days': 7},
+}
 
 
 def _load_tickers():
@@ -191,27 +198,27 @@ def check_loaders_success():
     """Gate: ensure RAW tables have sufficient ticker coverage before running dbt.
 
     With 50 tickers, partial failures are expected (API limits, transient errors).
-    We require at least MIN_TICKER_COVERAGE distinct tickers with new data today.
+    Each table has its own minimum threshold and lookback window configured in
+    MIN_TICKER_COVERAGE.  SEC filings use a 7-day window because companies only
+    file quarterly — on most days very few tickers will have brand-new rows.
     """
     from src.utils.snowflake_client import SnowflakeClient
     sf = SnowflakeClient(component="airflow_loader_gate")
-    raw_tables = [
-        'RAW.RAW_STOCK_PRICES',
-        'RAW.RAW_FUNDAMENTALS',
-        'RAW.RAW_NEWS',
-        'RAW.RAW_SEC_FILINGS',
-    ]
     low_coverage = []
     try:
-        for table in raw_tables:
+        for table, cfg in MIN_TICKER_COVERAGE.items():
+            lookback = cfg['lookback_days']
+            threshold = cfg['min_tickers']
+            date_expr = f"CURRENT_DATE() - {lookback}" if lookback else "CURRENT_DATE()"
             df = sf.query_to_dataframe(
                 f"SELECT COUNT(DISTINCT TICKER) AS cnt FROM {table} "
-                f"WHERE ingested_at >= CURRENT_DATE()"
+                f"WHERE ingested_at >= {date_expr}"
             )
             count = int(df.iloc[0]['CNT']) if not df.empty else 0
-            print(f"  {table}: {count} distinct tickers with new data today")
-            if count < MIN_TICKER_COVERAGE:
-                low_coverage.append(f"{table} ({count}/{MIN_TICKER_COVERAGE})")
+            window = f"last {lookback}d" if lookback else "today"
+            print(f"  {table}: {count} distinct tickers ({window})")
+            if count < threshold:
+                low_coverage.append(f"{table} ({count}/{threshold})")
     finally:
         sf.close()
 
@@ -219,7 +226,7 @@ def check_loaders_success():
         raise AirflowException(
             f"Loader gate failed — insufficient ticker coverage: {', '.join(low_coverage)}"
         )
-    print(f"All tables have >= {MIN_TICKER_COVERAGE} tickers with fresh data — proceeding to dbt.")
+    print("All tables meet ticker coverage thresholds — proceeding to dbt.")
 
 
 def data_quality_check():

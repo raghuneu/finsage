@@ -17,7 +17,12 @@ WITH base AS (
         cik,
         concept,
         value,
-        fiscal_year,
+        -- Re-derive fiscal_year from the period end date so that
+        -- comparative rows (prior-year data reported in later filings)
+        -- land in the correct calendar year.  The XBRL 'fy' field
+        -- reflects the filing's own fiscal year, not the period year.
+        YEAR(TO_DATE(TRIM(period_end, '"'), 'YYYY-MM-DD'))
+                                            AS fiscal_year,
         fiscal_period,
         period_end,
         form_type,
@@ -26,28 +31,20 @@ WITH base AS (
     FROM {{ ref('stg_sec_filings') }}
 ),
 
--- Deduplicate: 10-Q filings report both a current-period value and a
--- prior-year comparison value for the same concept+fiscal_period.
--- Prior-year rows have YEAR(period_end) < fiscal_year.
--- Strategy: first filter to current-period rows only (period_end year =
--- fiscal_year), then among remaining duplicates pick the latest period_end
--- with the most recent filing date as tiebreaker.
-current_period AS (
-    SELECT *
-    FROM base
-    WHERE YEAR(TO_DATE(TRIM(period_end, '"'), 'YYYY-MM-DD')) = fiscal_year
-),
-
+-- Deduplicate: the same (ticker, concept, fiscal_year, fiscal_period)
+-- may appear multiple times across different filings (e.g. 10-K reports
+-- current + prior year, and quarterly filings overlap).  Keep the row
+-- with the latest period_end; break ties with the most recent filing.
 deduped AS (
     SELECT *
     FROM (
         SELECT
-            current_period.*,
+            base.*,
             ROW_NUMBER() OVER (
                 PARTITION BY ticker, cik, concept, fiscal_year, fiscal_period
                 ORDER BY period_end DESC, filed_date DESC
             ) AS _rn
-        FROM current_period
+        FROM base
     )
     WHERE _rn = 1
 ),
@@ -66,6 +63,15 @@ pivoted AS (
 
         MAX(CASE WHEN concept = 'RevenueFromContractWithCustomerExcludingAssessedTax'
             THEN value END)                         AS revenue_from_contracts,
+
+        MAX(CASE WHEN concept = 'SalesRevenueNet'
+            THEN value END)                         AS sales_revenue_net,
+
+        MAX(CASE WHEN concept = 'SalesRevenueGoodsNet'
+            THEN value END)                         AS sales_revenue_goods_net,
+
+        MAX(CASE WHEN concept = 'RevenuesNetOfInterestExpense'
+            THEN value END)                         AS revenues_net_of_interest,
 
         MAX(CASE WHEN concept = 'NetIncomeLoss'
             THEN value END)                         AS net_income,
@@ -113,9 +119,12 @@ with_derived AS (
         form_type,
 
         -- Use whichever revenue concept is populated
-        COALESCE(revenues, revenue_from_contracts)  AS total_revenue,
+        COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest)  AS total_revenue,
         revenues,
         revenue_from_contracts,
+        sales_revenue_net,
+        sales_revenue_goods_net,
+        revenues_net_of_interest,
         net_income,
         total_assets,
         total_liabilities,
@@ -127,11 +136,11 @@ with_derived AS (
 
         -- ── Derived metrics ───────────────────────────────────
         ROUND(
-            net_income / NULLIF(COALESCE(revenues, revenue_from_contracts), 0) * 100
+            net_income / NULLIF(COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest), 0) * 100
         , 4)                                        AS net_margin_pct,
 
         ROUND(
-            operating_income / NULLIF(COALESCE(revenues, revenue_from_contracts), 0) * 100
+            operating_income / NULLIF(COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest), 0) * 100
         , 4)                                        AS operating_margin_pct,
 
         ROUND(
@@ -149,19 +158,19 @@ with_derived AS (
         , 4)                                        AS debt_to_equity_ratio,
 
         -- ── YoY growth (vs same period prior year) ────────────
-        LAG(COALESCE(revenues, revenue_from_contracts), 1) OVER (
+        LAG(COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest), 1) OVER (
             PARTITION BY ticker, fiscal_period
             ORDER BY fiscal_year
         )                                           AS revenue_prior_year,
 
         ROUND(
             (
-                COALESCE(revenues, revenue_from_contracts)
-                - LAG(COALESCE(revenues, revenue_from_contracts), 1) OVER (
+                COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest)
+                - LAG(COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest), 1) OVER (
                     PARTITION BY ticker, fiscal_period ORDER BY fiscal_year
                 )
             ) / NULLIF(
-                LAG(COALESCE(revenues, revenue_from_contracts), 1) OVER (
+                LAG(COALESCE(revenues, revenue_from_contracts, sales_revenue_net, sales_revenue_goods_net, revenues_net_of_interest), 1) OVER (
                     PARTITION BY ticker, fiscal_period ORDER BY fiscal_year
                 )
             , 0) * 100

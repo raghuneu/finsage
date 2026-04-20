@@ -155,12 +155,6 @@ def start_cavm_pipeline(req: CAVMRequest, session=Depends(get_snowpark_session))
 
     def _run():
         try:
-            # Auto-load missing data if requested
-            if req.auto_load and not readiness["ready"]:
-                _tasks[task_id]["stage"] = -1  # indicates data loading
-                from utils.on_demand_loader import ensure_data_for_ticker
-                ensure_data_for_ticker(ticker=ticker)
-
             from orchestrator import generate_report_pipeline
 
             def _update_stage(stage: int):
@@ -178,6 +172,7 @@ def start_cavm_pipeline(req: CAVMRequest, session=Depends(get_snowpark_session))
                 skip_charts=req.skip_charts,
                 charts_dir=req.charts_dir,
                 detail_level=req.detail_level,
+                auto_load=req.auto_load,
                 on_stage=_update_stage,
                 on_message=_add_message,
             )
