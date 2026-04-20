@@ -1,5 +1,6 @@
 """FinSage FastAPI Backend — serves Snowflake data to the React frontend."""
 
+import os
 import time
 import logging
 from fastapi import FastAPI, Request
@@ -35,9 +36,15 @@ app = FastAPI(title="FinSage API", version="1.0.0")
 
 app.add_middleware(RequestMetricsMiddleware)
 
+# CORS: allow localhost for local dev + deployed frontend origins
+_cors_origins = ["http://localhost:3000"]
+_frontend_origin = os.getenv("FRONTEND_URL")  # e.g. https://finsage.netlify.app
+if _frontend_origin:
+    _cors_origins.append(_frontend_origin.rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
