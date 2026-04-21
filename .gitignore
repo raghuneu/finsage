@@ -17,9 +17,6 @@ ignoreFiles/
 outputs/OldReports/
 outputs/
 
-# Claude Code local settings (not shared)
-.claude/settings.local.json.claude/
-
 # IDE configs
 .idea/
 .vscode/
@@ -32,3 +29,30 @@ outputs/
 
 # Stray git artifacts
 FETCH_HEAD
+
+# AI tooling — personal config & ephemeral state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.cortex/settings.json
+.cortex/settings.local.json
+
+# AI tooling — generic rules (not project-specific)
+.claude/rules/
+.cortex/rules/agents.md
+.cortex/rules/code-review.md
+.cortex/rules/coding-style.md
+.cortex/rules/git-workflow.md
+.cortex/rules/performance.md
+.cortex/rules/security.md
+.cortex/rules/testing.md
+
+# AI tooling — generic agents (keep only project-specific ones)
+.cortex/agents/build-error-resolver.md
+.cortex/agents/planner.md
+.cortex/agents/python-reviewer.md
+.cortex/agents/security-reviewer.md
+.cortex/agents/silent-failure-hunter.md
+.cortex/agents/tdd-guide.md
+
+# AI tooling — generic skills (not project-specific)
+.cortex/skills/frontend-design/

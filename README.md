@@ -267,6 +267,14 @@ Reports are saved to `outputs/<TICKER>_<YYYYMMDD>_<HHMMSS>/` and include:
 
 ---
 
+<h2 align="center">On AI-Assisted Development</h2>
+
+<p align="center">
+This repo includes project-specific AI tooling context under <code>.cortex/skills/</code> and <code>.claude/commands/</code>. These are curated reference packs — the CAVM architecture, dbt conventions, SEC pipeline patterns, and warehouse schema — that we built up over the semester to make AI pair programming useful on a codebase this size. The design choices, benchmark methodology, system integration, and debugging were ours. The AI tooling was a force multiplier, not the author.
+</p>
+
+---
+
 <div align="center">
 
 ## License
