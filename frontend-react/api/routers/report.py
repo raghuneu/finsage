@@ -20,6 +20,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 logger = logging.getLogger("finsage.report")
 
 STAGE_FQN = "@FINSAGE_DB.PUBLIC.FINSAGE_REPORTS_STAGE"
+STAGE_NAME = "FINSAGE_DB.PUBLIC.FINSAGE_REPORTS_STAGE"  # without @ for ALTER STAGE
 PRESIGNED_EXPIRY = 3600  # 1 hour
 
 
@@ -38,6 +39,8 @@ def _upload_to_stage(local_path: str, stage_path: str) -> Optional[str]:
                 auto_compress=False,
                 overwrite=True,
             )
+            # Refresh directory metadata so DIRECTORY() queries see the new file
+            session.sql(f"ALTER STAGE {STAGE_NAME} REFRESH").collect()
             rows = session.sql(
                 f"SELECT GET_PRESIGNED_URL({STAGE_FQN}, '{stage_path}', {PRESIGNED_EXPIRY})"
             ).collect()
@@ -47,7 +50,7 @@ def _upload_to_stage(local_path: str, stage_path: str) -> Optional[str]:
         finally:
             session.close()
     except Exception as e:
-        logger.warning("Stage upload failed for %s: %s", stage_path, e)
+        logger.exception("Stage upload failed for %s: %s", stage_path, e)
         return None
 
 

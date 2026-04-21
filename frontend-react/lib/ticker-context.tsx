@@ -57,8 +57,8 @@ export function TickerProvider({ children }: { children: ReactNode }) {
     setCompanyName(null);
     fetchCompanyName(ticker)
       .then((res) => {
-        nameCache.current[ticker] = res.company_name;
-        setCompanyName(res.company_name);
+        nameCache.current[ticker] = res.name;
+        setCompanyName(res.name);
       })
       .catch(() => {
         nameCache.current[ticker] = null;
@@ -92,7 +92,7 @@ export function TickerProvider({ children }: { children: ReactNode }) {
     fetchCompanyName(clean)
       .then((res) => {
         if (res.valid) {
-          nameCache.current[clean] = res.company_name;
+          nameCache.current[clean] = res.name;
           setTicker(clean);
           setTickers((prev) => (prev.includes(clean) ? prev : [...prev, clean]));
         } else {
