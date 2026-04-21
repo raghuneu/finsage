@@ -1,0 +1,379 @@
+# Warehouse Schema
+
+Reference for the FinSage Snowflake warehouse — tables, columns, grains, dbt lineage, and categorical value distributions.
+
+> Database: **FINSAGE_DB** | Warehouse: **FINSAGE_WH**
+
+## Quick Reference
+
+| Concept | Table | Key Column(s) | Date Column |
+|---------|-------|---------------|-------------|
+| Companies | FINSAGE_DB.ANALYTICS.DIM_COMPANY | TICKER | DBT_UPDATED_AT |
+| Stock prices (daily) | FINSAGE_DB.ANALYTICS.FCT_STOCK_METRICS | TICKER, DATE | DATE |
+| Fundamentals (quarterly) | FINSAGE_DB.ANALYTICS.FCT_FUNDAMENTALS_GROWTH | TICKER, FISCAL_QUARTER | DBT_UPDATED_AT |
+| News sentiment (daily) | FINSAGE_DB.ANALYTICS.FCT_NEWS_SENTIMENT_AGG | TICKER, NEWS_DATE | NEWS_DATE |
+| SEC financials (annual/quarterly) | FINSAGE_DB.ANALYTICS.FCT_SEC_FINANCIAL_SUMMARY | TICKER, FISCAL_YEAR, FISCAL_PERIOD | PERIOD_END |
+| Raw stock prices | FINSAGE_DB.RAW.RAW_STOCK_PRICES | TICKER, DATE | DATE |
+| Raw fundamentals | FINSAGE_DB.RAW.RAW_FUNDAMENTALS | TICKER, FISCAL_QUARTER | INGESTED_AT |
+| Raw news articles | FINSAGE_DB.RAW.RAW_NEWS | ARTICLE_ID | PUBLISHED_AT |
+| Raw SEC XBRL filings | FINSAGE_DB.RAW.RAW_SEC_FILINGS | TICKER, CONCEPT, PERIOD_END, FISCAL_PERIOD | PERIOD_END |
+| Raw SEC filing documents | FINSAGE_DB.RAW.RAW_SEC_FILING_DOCUMENTS | FILING_ID | FILING_DATE |
+| Raw SEC filing text | FINSAGE_DB.RAW.RAW_SEC_FILING_TEXT | TICKER, ACCESSION_NUMBER | FILING_DATE |
+
+**Tracked tickers:** 50 U.S. public companies across Technology, Consumer/Retail, Finance, Healthcare, and Energy/Industrial sectors. Full list in `config/tickers.yaml`.
+
+## Categorical Columns
+
+When filtering on these columns, use these known values:
+
+| Table | Column | Values (count at last snapshot) |
+|-------|--------|----------------|
+| FCT_STOCK_METRICS | TREND_SIGNAL | `BULLISH` (1056), `BEARISH` (726), `NEUTRAL` (279) |
+| FCT_FUNDAMENTALS_GROWTH | FUNDAMENTAL_SIGNAL | `DECLINING` (7), `MODERATE_GROWTH` (7), `STRONG_GROWTH` (6), `MIXED` (5) |
+| FCT_NEWS_SENTIMENT_AGG | SENTIMENT_LABEL | `BULLISH` (33), `NEUTRAL` (26), `BEARISH` (9) |
+| FCT_NEWS_SENTIMENT_AGG | SENTIMENT_TREND | `DETERIORATING` (33), `IMPROVING` (30), `STABLE` (5) |
+| FCT_SEC_FINANCIAL_SUMMARY | FINANCIAL_HEALTH | `FAIR` (183), `HEALTHY` (78), `UNPROFITABLE` (25), `EXCELLENT` (20) |
+| DIM_COMPANY | MARKET_CAP_CATEGORY | `MEGA_CAP`, `LARGE_CAP`, `MID_CAP`, `SMALL_CAP`, `MICRO_CAP` |
+
+## Data Layer Hierarchy
+
+Query downstream first: `ANALYTICS` > `STAGING` > `RAW`
+
+| Layer | Schema | Purpose | Materialization |
+|-------|--------|---------|-----------------|
+| Analytics | `ANALYTICS` | Derived metrics, signals, aggregations for reports | Tables (dbt) |
+| Staging | `STAGING` | Cleaned/validated data with `is_valid` flags | Views (dbt) |
+| Raw | `RAW` | Source data from APIs (Yahoo Finance, NewsAPI, SEC EDGAR) | Tables (DDL) |
+| Public | `PUBLIC` | Temporary staging tables for MERGE loads | Tables (transient) |
+
+---
+
+## ANALYTICS Schema
+
+Analytics layer tables are materialized by dbt from staging views. Used by the CAVM multi-agent report pipeline.
+
+### DIM_COMPANY
+Company dimension -- one row per ticker with latest snapshot metrics and coverage stats.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER | TEXT | Stock symbol (PK, unique, not_null) |
+| CIK | TEXT | SEC Central Index Key |
+| LATEST_FORM_TYPE | TEXT | Most recent SEC filing type |
+| MARKET_CAP | NUMBER | Latest market capitalization |
+| PE_RATIO | FLOAT | Price-to-earnings ratio |
+| PROFIT_MARGIN | FLOAT | Profit margin |
+| DEBT_TO_EQUITY | FLOAT | Debt-to-equity ratio |
+| PRICE_HISTORY_START | DATE | Earliest stock price date |
+| PRICE_HISTORY_END | DATE | Latest stock price date |
+| TOTAL_TRADING_DAYS | NUMBER | Count of trading days with data |
+| TOTAL_NEWS_ARTICLES | NUMBER | Count of news articles |
+| EARLIEST_NEWS_DATE | TIMESTAMP_NTZ | First news article date |
+| LATEST_NEWS_DATE | TIMESTAMP_NTZ | Latest news article date |
+| MARKET_CAP_CATEGORY | TEXT | MEGA_CAP / LARGE_CAP / MID_CAP / SMALL_CAP / MICRO_CAP |
+| DATA_SOURCES_AVAILABLE | NUMBER | 0-4 count of data source coverage |
+| DBT_UPDATED_AT | TIMESTAMP_LTZ | dbt model refresh timestamp |
+
+- **Grain:** One row per ticker
+- **Key tests:** unique(TICKER), not_null(TICKER)
+
+---
+
+### FCT_STOCK_METRICS
+Daily stock price metrics with rolling averages, volatility, and SMA-based trend signals.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER | TEXT | Stock symbol |
+| DATE | DATE | Trading date |
+| OPEN | FLOAT | Opening price |
+| HIGH | FLOAT | Daily high |
+| LOW | FLOAT | Daily low |
+| CLOSE | FLOAT | Closing price |
+| VOLUME | NUMBER | Trading volume |
+| DAILY_RETURN_PCT | FLOAT | Close-to-close daily return % |
+| SMA_7D | FLOAT | 7-day simple moving average |
+| SMA_30D | FLOAT | 30-day simple moving average |
+| SMA_90D | FLOAT | 90-day simple moving average |
+| AVG_VOLUME_30D | NUMBER | 30-day average volume |
+| VOLATILITY_30D_PCT | FLOAT | 30-day rolling volatility (stddev of returns) |
+| DAILY_RANGE | FLOAT | High - Low |
+| DAILY_RANGE_PCT | FLOAT | Daily range as % of close |
+| WEEK_52_HIGH | FLOAT | 52-week high |
+| WEEK_52_LOW | FLOAT | 52-week low |
+| PRICE_POSITION_52W_PCT | FLOAT | Relative position within 52-week range |
+| TREND_SIGNAL | TEXT | BULLISH / BEARISH / NEUTRAL (SMA crossover) |
+| DBT_UPDATED_AT | TIMESTAMP_LTZ | dbt model refresh timestamp |
+
+- **Grain:** One row per ticker per trading day
+- **Key tests:** not_null(TICKER, DATE)
+
+---
+
+### FCT_FUNDAMENTALS_GROWTH
+Quarterly fundamentals with QoQ and YoY growth rates and health signals.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER | TEXT | Stock symbol |
+| FISCAL_QUARTER | TEXT | Fiscal quarter label |
+| MARKET_CAP | NUMBER | Market capitalization |
+| REVENUE | FLOAT | Quarterly revenue |
+| NET_INCOME | FLOAT | Quarterly net income |
+| EPS | FLOAT | Earnings per share |
+| PE_RATIO | FLOAT | Price-to-earnings ratio |
+| PROFIT_MARGIN | FLOAT | Profit margin |
+| DEBT_TO_EQUITY | FLOAT | Debt-to-equity ratio |
+| TOTAL_ASSETS | FLOAT | Total assets |
+| TOTAL_LIABILITIES | FLOAT | Total liabilities |
+| BOOK_VALUE | FLOAT | Total assets - total liabilities |
+| ROA | FLOAT | Return on assets % |
+| NET_MARGIN | FLOAT | Net income / revenue % |
+| DATA_QUALITY_SCORE | FLOAT | Ingestion quality score (0-100) |
+| REVENUE_GROWTH_QOQ | FLOAT | Quarter-over-quarter revenue growth % |
+| NET_INCOME_GROWTH_QOQ | FLOAT | QoQ net income growth % |
+| EPS_GROWTH_QOQ | FLOAT | QoQ EPS growth % |
+| REVENUE_GROWTH_YOY | FLOAT | Year-over-year revenue growth % |
+| NET_INCOME_GROWTH_YOY | FLOAT | YoY net income growth % |
+| EPS_GROWTH_YOY | FLOAT | YoY EPS growth % |
+| FUNDAMENTAL_SIGNAL | TEXT | STRONG_GROWTH / MODERATE_GROWTH / DECLINING / MIXED |
+| DBT_UPDATED_AT | TIMESTAMP_LTZ | dbt model refresh timestamp |
+
+- **Grain:** One row per ticker per fiscal quarter
+- **Key tests:** not_null(TICKER, FISCAL_QUARTER)
+
+---
+
+### FCT_NEWS_SENTIMENT_AGG
+Daily aggregated news sentiment per ticker with Cortex ML scores and trend signals.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER | TEXT | Stock symbol |
+| NEWS_DATE | DATE | Article date |
+| ARTICLE_COUNT | NUMBER | Total articles for this ticker/day |
+| POSITIVE_COUNT | NUMBER | Positive sentiment article count |
+| NEGATIVE_COUNT | NUMBER | Negative sentiment article count |
+| NEUTRAL_COUNT | NUMBER | Neutral sentiment article count |
+| AVG_SENTIMENT_SCORE | FLOAT | Daily average Cortex sentiment (-1.0 to +1.0) |
+| POSITIVE_RATIO | FLOAT | Positive articles / total articles |
+| ROLLING_SENTIMENT_7D | FLOAT | 7-day rolling average sentiment |
+| ROLLING_VOLUME_7D | NUMBER | 7-day article volume |
+| VOLUME_MOMENTUM | NUMBER | Change in article volume |
+| SENTIMENT_LABEL | TEXT | BULLISH / BEARISH / NEUTRAL / NO_COVERAGE |
+| SENTIMENT_TREND | TEXT | IMPROVING / DETERIORATING / STABLE |
+| DBT_UPDATED_AT | TIMESTAMP_LTZ | dbt model refresh timestamp |
+
+- **Grain:** One row per ticker per day
+- **Key tests:** not_null(TICKER, NEWS_DATE)
+
+---
+
+### FCT_SEC_FINANCIAL_SUMMARY
+Pivoted SEC XBRL data with derived financial ratios and YoY growth.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER | TEXT | Stock symbol |
+| FISCAL_YEAR | NUMBER | Fiscal year |
+| FISCAL_PERIOD | TEXT | FY, Q1, Q2, Q3, Q4 |
+| FORM_TYPE | TEXT | 10-K or 10-Q |
+| REVENUE | FLOAT | Total revenue (coalesced from SEC concepts) |
+| NET_INCOME | FLOAT | Net income / loss |
+| TOTAL_ASSETS | FLOAT | Total assets |
+| TOTAL_LIABILITIES | FLOAT | Total liabilities |
+| STOCKHOLDERS_EQUITY | FLOAT | Stockholders' equity |
+| OPERATING_INCOME | FLOAT | Operating income / loss |
+| EPS | FLOAT | Earnings per share |
+| CASH_AND_EQUIVALENTS | FLOAT | Cash and cash equivalents |
+| DATA_QUALITY_SCORE | FLOAT | Ingestion quality score (0-100) |
+| NET_MARGIN | FLOAT | Net income / revenue % |
+| OPERATING_MARGIN | FLOAT | Operating income / revenue % |
+| ROA | FLOAT | Return on assets % |
+| ROE | FLOAT | Return on equity % |
+| DEBT_TO_EQUITY | FLOAT | Total liabilities / stockholders' equity |
+| BOOK_VALUE | FLOAT | Total assets - total liabilities |
+| PREV_YEAR_REVENUE | FLOAT | Prior year revenue (for YoY calc) |
+| PREV_YEAR_NET_INCOME | FLOAT | Prior year net income (for YoY calc) |
+| REVENUE_GROWTH_YOY | FLOAT | Year-over-year revenue growth % |
+| NET_INCOME_GROWTH_YOY | FLOAT | Year-over-year net income growth % |
+| FINANCIAL_HEALTH | TEXT | EXCELLENT / HEALTHY / FAIR / UNPROFITABLE |
+| DBT_UPDATED_AT | TIMESTAMP_LTZ | dbt model refresh timestamp |
+
+- **Grain:** One row per ticker per fiscal year + fiscal period
+- **Key tests:** not_null(TICKER, FISCAL_YEAR, FISCAL_PERIOD)
+
+---
+
+## STAGING Schema
+
+Staging layer views are dbt-materialized views over RAW tables. All add `IS_VALID` flag and filter to valid rows only.
+
+### STG_STOCK_PRICES
+Cleaned stock prices with daily return calculation. Filters last 2 years, validates close > 0 and high >= low.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER | TEXT | Stock symbol (not_null) |
+| DATE | DATE | Trading date (not_null) |
+| OPEN, HIGH, LOW, CLOSE | FLOAT | OHLC prices |
+| VOLUME | NUMBER | Trading volume |
+| DIVIDENDS | FLOAT | Dividends |
+| STOCK_SPLITS | FLOAT | Stock splits |
+| SOURCE | TEXT | Data source |
+| INGESTED_AT | TIMESTAMP_NTZ | Ingestion timestamp |
+| DATA_QUALITY_SCORE | FLOAT | Quality score (0-100) |
+| DAILY_RETURN | FLOAT | Close-to-close return % |
+| IS_VALID | BOOLEAN | Passes validation checks |
+
+- **Materialization:** View
+- **Tests:** not_null(TICKER), not_null(DATE), not_null(CLOSE)
+
+---
+
+### STG_FUNDAMENTALS
+Cleaned fundamentals. Validates revenue >= 0, market_cap not null.
+
+| Column | Type | Key columns |
+|--------|------|-------------|
+| TICKER | TEXT | not_null |
+| FISCAL_QUARTER | TEXT | not_null |
+| MARKET_CAP, REVENUE, NET_INCOME, EPS, PE_RATIO, PROFIT_MARGIN, DEBT_TO_EQUITY, TOTAL_ASSETS, TOTAL_LIABILITIES | various | Financial metrics |
+| IS_VALID | BOOLEAN | Passes validation |
+
+- **Materialization:** View
+
+---
+
+### STG_NEWS
+Cleaned news with Cortex ML sentiment scoring. Filters last 3 months.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| ARTICLE_ID | TEXT | not_null |
+| TICKER | TEXT | Stock symbol |
+| TITLE, DESCRIPTION, CONTENT | TEXT | Article text |
+| PUBLISHED_AT | TIMESTAMP_NTZ | Publication date |
+| SENTIMENT_SCORE | FLOAT | Cortex SENTIMENT() result (-1.0 to +1.0) |
+| SENTIMENT | TEXT | positive / negative / neutral (0.2 threshold) |
+| IS_VALID | BOOLEAN | Passes validation |
+
+- **Materialization:** View
+
+---
+
+### STG_SEC_FILINGS
+Cleaned SEC XBRL filings with reporting frequency. Validates value, period_end, fiscal_year not null.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| TICKER, CIK, CONCEPT, LABEL | TEXT | Filing identifiers |
+| PERIOD_START, PERIOD_END | DATE | Reporting period |
+| VALUE | FLOAT | Financial value |
+| FISCAL_YEAR, FISCAL_PERIOD, FORM_TYPE | TEXT/NUMBER | Filing metadata |
+| REPORTING_FREQUENCY | TEXT | 'annual' for FY, 'quarterly' otherwise |
+| IS_VALID | BOOLEAN | Passes validation |
+
+- **Materialization:** View
+
+---
+
+### STG_SEC_FILING_DOCUMENTS
+Cleaned SEC filing documents with MD&A and Risk Factors extraction status.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| FILING_ID | TEXT | Unique filing ID (not_null, unique) |
+| TICKER, CIK | TEXT | Company identifiers |
+| FORM_TYPE | TEXT | 10-K or 10-Q (accepted_values tested) |
+| MDA_TEXT, RISK_FACTORS_TEXT | TEXT | Extracted filing sections |
+| HAS_MDA, HAS_RISK_FACTORS | BOOLEAN | Text present and >100 chars |
+| EXTRACTION_STATUS | TEXT | extracted / pending / failed |
+| IS_VALID | BOOLEAN | Passes validation |
+
+- **Materialization:** View
+- **Tests:** unique(FILING_ID), not_null(FILING_ID, TICKER, FORM_TYPE), accepted_values(FORM_TYPE, EXTRACTION_STATUS)
+
+---
+
+## RAW Schema
+
+Source data tables loaded via Python data loaders with idempotent MERGE statements.
+
+### RAW_STOCK_PRICES
+Daily OHLCV stock price data from Yahoo Finance.
+- **PK:** (TICKER, DATE)
+- **Columns:** TICKER, DATE, OPEN, HIGH, LOW, CLOSE, VOLUME, DIVIDENDS, STOCK_SPLITS, SOURCE, INGESTED_AT, DATA_QUALITY_SCORE
+
+### RAW_FUNDAMENTALS
+Quarterly fundamentals from Yahoo Finance / Alpha Vantage.
+- **PK:** (TICKER, FISCAL_QUARTER)
+- **Columns:** TICKER, FISCAL_QUARTER, MARKET_CAP, REVENUE, NET_INCOME, EPS, PE_RATIO, PROFIT_MARGIN, DEBT_TO_EQUITY, TOTAL_ASSETS, TOTAL_LIABILITIES, SOURCE, INGESTED_AT, DATA_QUALITY_SCORE
+
+### RAW_NEWS
+News articles from NewsAPI.
+- **PK:** ARTICLE_ID
+- **Columns:** ARTICLE_ID, TICKER, TITLE, DESCRIPTION, CONTENT, AUTHOR, SOURCE_NAME, URL, PUBLISHED_AT, INGESTED_AT, DATA_QUALITY_SCORE
+
+### RAW_SEC_FILINGS
+SEC EDGAR XBRL financial concepts (long format).
+- **PK:** (TICKER, CONCEPT, PERIOD_END, FISCAL_PERIOD)
+- **Columns:** TICKER, CIK, CONCEPT, LABEL, PERIOD_START, PERIOD_END, VALUE, UNIT, FISCAL_YEAR, FISCAL_PERIOD, FORM_TYPE, FILED_DATE, ACCESSION_NO, SOURCE, INGESTED_AT, DATA_QUALITY_SCORE
+
+### RAW_SEC_FILING_DOCUMENTS
+SEC filing document metadata with extracted MD&A and Risk Factors text, linked to S3.
+- **PK:** (FILING_ID, TICKER)
+- **Columns:** FILING_ID, TICKER, CIK, FORM_TYPE, FILING_DATE, PERIOD_OF_REPORT, FISCAL_YEAR, FISCAL_PERIOD, COMPANY_NAME, S3_RAW_KEY, S3_MDA_KEY, S3_RISK_KEY, FILE_FORMAT, FILE_SIZE_BYTES, MDA_TEXT, RISK_FACTORS_TEXT, MDA_WORD_COUNT, RISK_WORD_COUNT, DOWNLOAD_STATUS, EXTRACTION_STATUS, EXTRACTION_ERROR, DATA_QUALITY_SCORE, SOURCE, INGESTED_AT, UPDATED_AT
+
+### RAW_SEC_FILING_TEXT
+Full SEC 10-K/10-Q filing text for LLM analysis (VARIANT column).
+- **PK:** (TICKER, ACCESSION_NUMBER)
+- **Columns:** TICKER, CIK, COMPANY_NAME, FORM_TYPE, FILING_DATE, REPORT_DATE, FISCAL_YEAR, FISCAL_PERIOD, ACCESSION_NUMBER, PRIMARY_DOCUMENT, FILING_TEXT (VARIANT), FILING_URL, SOURCE, INGESTED_AT, DATA_QUALITY_SCORE
+
+---
+
+## PUBLIC Schema
+
+Temporary staging tables used during MERGE load operations. All have 0 rows after loads complete.
+
+| Table | Purpose |
+|-------|---------|
+| TEMP_FUNDAMENTALS_STAGING | Temp stage for fundamentals MERGE |
+| TEMP_NEWS_STAGING | Temp stage for news MERGE |
+| TEMP_SEC_STAGING | Temp stage for SEC MERGE |
+| TEMP_STOCK_STAGING | Temp stage for stock prices MERGE |
+
+---
+
+## dbt Lineage
+
+```
+RAW_STOCK_PRICES ------> stg_stock_prices --------> fct_stock_metrics
+                                                \--> dim_company
+RAW_FUNDAMENTALS ------> stg_fundamentals --------> fct_fundamentals_growth
+                                                \--> dim_company
+RAW_NEWS --------------> stg_news ----------------> fct_news_sentiment_agg
+                                                \--> dim_company
+RAW_SEC_FILINGS -------> stg_sec_filings ----------> fct_sec_financial_summary
+                                                \--> dim_company
+RAW_SEC_FILING_DOCUMENTS > stg_sec_filing_documents  (no analytics model downstream)
+RAW_SEC_FILING_TEXT                                   (no dbt model -- used by LLM agents)
+```
+
+## Relationships
+
+Inferred relationships based on shared key columns:
+
+```
+DIM_COMPANY.TICKER
+  |-- FCT_STOCK_METRICS.TICKER
+  |-- FCT_FUNDAMENTALS_GROWTH.TICKER
+  |-- FCT_NEWS_SENTIMENT_AGG.TICKER
+  |-- FCT_SEC_FINANCIAL_SUMMARY.TICKER
+  |-- RAW_*.TICKER (all raw tables)
+```
+
+All tables join on `TICKER`. Cross-table joins:
+- Stock + Fundamentals: `TICKER` (different grains: daily vs quarterly)
+- Stock + News Sentiment: `TICKER` + `DATE = NEWS_DATE`
+- SEC Summary + Fundamentals: `TICKER` + `FISCAL_YEAR` / `FISCAL_PERIOD`

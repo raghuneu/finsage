@@ -228,4 +228,4 @@ When querying the warehouse, use these table mappings:
 - `SENTIMENT_LABEL`: BULLISH, BEARISH, NEUTRAL, NO_COVERAGE
 - `FINANCIAL_HEALTH`: EXCELLENT, HEALTHY, FAIR, UNPROFITABLE
 
-More detail in `.astro/warehouse.md` (full schema dump with column-level metadata).
+More detail in `docs/warehouse.md` (full schema dump with column-level metadata).

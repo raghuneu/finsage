@@ -521,7 +521,7 @@
 
 **Documentation & Observability**
 
-- Added comprehensive warehouse schema documentation (.astro/warehouse.md)
+- Added comprehensive warehouse schema documentation (docs/warehouse.md)
 - Created 10 presentation architecture documents covering system architecture, data pipeline, Snowflake warehouse, CAVM pipeline, SEC filing pipeline, frontend, orchestration, infrastructure, design decisions, and talking points
 - Implemented observability tracking for data loaders and pipeline stages
 
