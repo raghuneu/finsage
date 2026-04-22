@@ -1,10 +1,13 @@
 """SEC Filing API — Filing inventory and Cortex analysis."""
 
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from deps import get_snowpark_session
 
 router = APIRouter()
+
+_sec_cache: TTLCache = TTLCache(maxsize=100, ttl=300)
 
 
 @router.get("/filings")
@@ -14,17 +17,20 @@ def get_filings(
 ):
     ticker = ticker.upper().strip()
 
+    if ticker in _sec_cache:
+        return _sec_cache[ticker]
+
     # Try document-level filings first
-    rows = session.sql(f"""
+    rows = session.sql("""
         SELECT FILING_ID, FORM_TYPE, FILING_DATE, PERIOD_OF_REPORT,
                COMPANY_NAME, MDA_WORD_COUNT, RISK_WORD_COUNT,
                EXTRACTION_STATUS, DATA_QUALITY_SCORE
         FROM RAW.RAW_SEC_FILING_DOCUMENTS
-        WHERE TICKER='{ticker}' ORDER BY FILING_DATE DESC
-    """).collect()
+        WHERE TICKER = ? ORDER BY FILING_DATE DESC
+    """, params=[ticker]).collect()
 
     if rows:
-        return {
+        result = {
             "source": "documents",
             "filings": [
                 {k: (str(v) if hasattr(v, "isoformat") else (float(v) if isinstance(v, (int, float)) and v is not None else v))
@@ -32,22 +38,26 @@ def get_filings(
                 for r in rows
             ],
         }
+        _sec_cache[ticker] = result
+        return result
 
     # Fallback to XBRL filings
-    rows = session.sql(f"""
+    rows = session.sql("""
         SELECT DISTINCT CONCEPT, FORM_TYPE, FILED_DATE AS FILING_DATE,
                FISCAL_YEAR, FISCAL_PERIOD, VALUE, DATA_QUALITY_SCORE
         FROM RAW.RAW_SEC_FILINGS
-        WHERE TICKER='{ticker}' ORDER BY FILED_DATE DESC LIMIT 50
-    """).collect()
+        WHERE TICKER = ? ORDER BY FILED_DATE DESC LIMIT 50
+    """, params=[ticker]).collect()
 
-    return {
+    result = {
         "source": "filings" if rows else "none",
         "filings": [
             {k: (str(v) if hasattr(v, "isoformat") else v) for k, v in r.as_dict().items()}
             for r in rows
         ],
     }
+    _sec_cache[ticker] = result
+    return result
 
 
 class AnalyzeRequest(BaseModel):

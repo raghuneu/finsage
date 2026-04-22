@@ -23,13 +23,15 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DownloadIcon from '@mui/icons-material/Download';
 import HistoryIcon from '@mui/icons-material/History';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import ReactMarkdown from 'react-markdown';
+import dynamic from 'next/dynamic';
 import { useTicker } from '@/lib/ticker-context';
 import { useReport } from '@/lib/report-context';
 import type { ExistingReport } from '@/lib/report-context';
 import SectionHeader from '@/components/SectionHeader';
 import MetricCard from '@/components/MetricCard';
-import ReportChat from '@/components/ReportChat';
+
+const ReactMarkdown = dynamic(() => import('react-markdown'), { ssr: false });
+const ReportChat = dynamic(() => import('@/components/ReportChat'), { ssr: false });
 
 const REPORT_SECTIONS = [
   'Executive Summary',
