@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Card,
@@ -35,18 +35,16 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import dynamic from 'next/dynamic';
+import useSWR from 'swr';
 import { useTicker } from '@/lib/ticker-context';
-import {
-  fetchStockMetrics,
-  fetchFundamentals,
-  fetchSentiment,
-  fetchSecFinancials,
-} from '@/lib/api';
+import { swrFetcher } from '@/lib/api';
 import SignalBadge from '@/components/SignalBadge';
 import SectionHeader from '@/components/SectionHeader';
-import PriceChart from '@/components/PriceChart';
 import { ChartSkeleton } from '@/components/LoadingSkeleton';
 import { getSignalColor } from '@/lib/signal-colors';
+
+const PriceChart = dynamic(() => import('@/components/PriceChart'), { ssr: false });
 
 function fmtMoney(val: number | null | undefined): string {
   if (val == null) return 'N/A';
@@ -127,19 +125,13 @@ function RawDataTable({ data }: { data: Record<string, unknown>[] }) {
 // ── Stock Metrics Tab ──────────────────────────────────────
 function StockMetricsTab() {
   const { ticker } = useTicker();
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useSWR<Record<string, unknown>[]>(
+    `/api/analytics/stock-metrics?ticker=${ticker}&limit=90`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    fetchStockMetrics(ticker)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, [ticker]);
-
-  if (loading) return <ChartSkeleton />;
-  if (data.length === 0)
+  if (isLoading) return <ChartSkeleton />;
+  if (!data || data.length === 0)
     return (
       <Typography variant="body2" sx={{ textAlign: 'center', py: 4, color: '#6B6760' }}>
         No stock metrics available.
@@ -195,19 +187,13 @@ function StockMetricsTab() {
 // ── Fundamentals Tab ───────────────────────────────────────
 function FundamentalsTab() {
   const { ticker } = useTicker();
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useSWR<Record<string, unknown>[]>(
+    `/api/analytics/fundamentals?ticker=${ticker}&limit=12`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    fetchFundamentals(ticker)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, [ticker]);
-
-  if (loading) return <ChartSkeleton />;
-  if (data.length === 0)
+  if (isLoading) return <ChartSkeleton />;
+  if (!data || data.length === 0)
     return (
       <Typography variant="body2" sx={{ textAlign: 'center', py: 4, color: '#6B6760' }}>
         No fundamentals data available.
@@ -291,19 +277,13 @@ function FundamentalsTab() {
 // ── Sentiment Tab ──────────────────────────────────────────
 function SentimentTab() {
   const { ticker } = useTicker();
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useSWR<Record<string, unknown>[]>(
+    `/api/analytics/sentiment?ticker=${ticker}&limit=30`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    fetchSentiment(ticker)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, [ticker]);
-
-  if (loading) return <ChartSkeleton />;
-  if (data.length === 0)
+  if (isLoading) return <ChartSkeleton />;
+  if (!data || data.length === 0)
     return (
       <Typography variant="body2" sx={{ textAlign: 'center', py: 4, color: '#6B6760' }}>
         No sentiment data available.
@@ -383,19 +363,13 @@ function SentimentTab() {
 // ── SEC Financials Tab ─────────────────────────────────────
 function SecFinancialsTab() {
   const { ticker } = useTicker();
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useSWR<Record<string, unknown>[]>(
+    `/api/analytics/sec-financials?ticker=${ticker}&limit=10`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    fetchSecFinancials(ticker)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, [ticker]);
-
-  if (loading) return <ChartSkeleton />;
-  if (data.length === 0)
+  if (isLoading) return <ChartSkeleton />;
+  if (!data || data.length === 0)
     return (
       <Typography variant="body2" sx={{ textAlign: 'center', py: 4, color: '#6B6760' }}>
         No SEC financial data available.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -34,7 +35,17 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="FinSage API", version="1.0.0")
+# ── App lifespan — init/close session pool ────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from deps import init_session_pool, close_session_pool
+    init_session_pool()
+    yield
+    close_session_pool()
+
+
+app = FastAPI(title="FinSage API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(RequestMetricsMiddleware)
 
@@ -67,49 +78,14 @@ if outputs_dir.exists():
 
 from deps import get_tickers
 
-# ── Company name lookup (lightweight HTTP, no yfinance import) ──
+# ── Company name lookup (static map + httpx fallback) ────────
 
 from collections import OrderedDict
 from typing import Optional
 import httpx
 
-_company_name_cache: "OrderedDict[str, Optional[str]]" = OrderedDict()
-_CACHE_MAX = 200
-
-
-@app.get("/api/company-name")
-def get_company_name(ticker: str):
-    """Return the company name for a ticker via Yahoo Finance quoteSummary (cached, lightweight)."""
-    t = ticker.upper().strip()
-    if t in _company_name_cache:
-        _company_name_cache.move_to_end(t)
-        name = _company_name_cache[t]
-        return {"ticker": t, "name": name, "valid": name is not None}
-    try:
-        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={t}&quotesCount=1&newsCount=0"
-        resp = httpx.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
-        data = resp.json()
-        quotes = data.get("quotes", [])
-        name = None
-        for q in quotes:
-            if q.get("symbol", "").upper() == t:
-                name = q.get("longname") or q.get("shortname") or None
-                break
-    except Exception:
-        name = None
-    _company_name_cache[t] = name
-    if len(_company_name_cache) > _CACHE_MAX:
-        _company_name_cache.popitem(last=False)
-    return {"ticker": t, "name": name, "valid": name is not None}
-
-
-@app.get("/api/tickers")
-def list_tickers():
-    return get_tickers()
-
-
-# ── Company name resolution (static map + yfinance fallback) ─
-_COMPANY_NAME_CACHE: dict[str, str | None] = {
+# Combined static map + dynamic cache
+_COMPANY_NAME_CACHE: "OrderedDict[str, Optional[str]]" = OrderedDict({
     "AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation", "GOOGL": "Alphabet Inc.",
     "AMZN": "Amazon.com Inc.", "META": "Meta Platforms Inc.", "TSLA": "Tesla Inc.",
     "NVDA": "NVIDIA Corporation", "JPM": "JPMorgan Chase & Co.", "V": "Visa Inc.",
@@ -127,35 +103,58 @@ _COMPANY_NAME_CACHE: dict[str, str | None] = {
     "QCOM": "Qualcomm Inc.", "LOW": "Lowe's Companies Inc.", "INTU": "Intuit Inc.",
     "SBUX": "Starbucks Corporation", "GE": "General Electric Co.", "CAT": "Caterpillar Inc.",
     "BA": "Boeing Co.", "GILD": "Gilead Sciences Inc.", "BKNG": "Booking Holdings Inc.",
-}
+})
+_CACHE_MAX = 200
 
 
 @app.get("/api/company-name")
 def get_company_name(ticker: str = Query(..., description="Stock ticker symbol")):
-    """Resolve a human-readable company name for a ticker."""
+    """Resolve a human-readable company name for a ticker (cached, lightweight httpx)."""
     clean = ticker.upper().strip()
     if not clean:
         return {"ticker": clean, "company_name": None, "valid": False}
 
     # Check cache first (includes static map)
     if clean in _COMPANY_NAME_CACHE:
-        return {"ticker": clean, "company_name": _COMPANY_NAME_CACHE[clean], "valid": True}
+        _COMPANY_NAME_CACHE.move_to_end(clean)
+        name = _COMPANY_NAME_CACHE[clean]
+        return {"ticker": clean, "company_name": name, "valid": name is not None}
 
-    # yfinance fallback
+    # Lightweight httpx fallback (no yfinance import)
+    name = None
     try:
-        import yfinance as yf
-        info = yf.Ticker(clean).info
-        name = info.get("shortName") or info.get("longName")
-        valid = name is not None or info.get("regularMarketPrice") is not None
-        _COMPANY_NAME_CACHE[clean] = name
-        return {"ticker": clean, "company_name": name, "valid": valid}
+        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={clean}&quotesCount=1&newsCount=0"
+        resp = httpx.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+        data = resp.json()
+        for q in data.get("quotes", []):
+            if q.get("symbol", "").upper() == clean:
+                name = q.get("longname") or q.get("shortname") or None
+                break
     except Exception:
-        _COMPANY_NAME_CACHE[clean] = None
-        return {"ticker": clean, "company_name": None, "valid": False}
+        pass
 
+    _COMPANY_NAME_CACHE[clean] = name
+    if len(_COMPANY_NAME_CACHE) > _CACHE_MAX:
+        _COMPANY_NAME_CACHE.popitem(last=False)
+    return {"ticker": clean, "company_name": name, "valid": name is not None}
+
+
+@app.get("/api/tickers")
+def list_tickers():
+    return get_tickers()
+
+
+# ── Health check (lightweight — no Snowflake session) ────────
 
 @app.get("/api/health")
 def health():
+    """Lightweight health check for load balancers / Render."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/db")
+def health_db():
+    """Deep health check — verifies Snowflake connectivity."""
     try:
         from deps import get_snowpark_session
 

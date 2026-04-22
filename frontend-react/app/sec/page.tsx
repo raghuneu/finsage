@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Card,
@@ -30,11 +30,15 @@ import {
   Legend,
 } from 'recharts';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import ReactMarkdown from 'react-markdown';
+import dynamic from 'next/dynamic';
+import useSWR from 'swr';
 import { useTicker } from '@/lib/ticker-context';
-import { fetchFilings, analyzeFilings } from '@/lib/api';
+import { swrFetcher } from '@/lib/api';
+import { analyzeFilings } from '@/lib/api';
 import SectionHeader from '@/components/SectionHeader';
 import { TableSkeleton } from '@/components/LoadingSkeleton';
+
+const ReactMarkdown = dynamic(() => import('react-markdown'), { ssr: false });
 
 const ANALYSIS_MODES = [
   { value: 'summary', label: 'Executive Summary', desc: 'Generate a concise summary of the latest filing.' },
@@ -45,22 +49,14 @@ const ANALYSIS_MODES = [
 
 export default function SECFilingPage() {
   const { ticker } = useTicker();
-  const [filingsData, setFilingsData] = useState<{ source: string; filings: Record<string, unknown>[] } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: filingsData, isLoading: loading } = useSWR<{ source: string; filings: Record<string, unknown>[] }>(
+    `/api/sec/filings?ticker=${ticker}`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
   const [mode, setMode] = useState('summary');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setAnalysisResult(null);
-    setAnalysisError(null);
-    fetchFilings(ticker)
-      .then(setFilingsData)
-      .catch(() => setFilingsData(null))
-      .finally(() => setLoading(false));
-  }, [ticker]);
 
   const runAnalysis = () => {
     setAnalyzing(true);

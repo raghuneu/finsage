@@ -6,6 +6,9 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// SWR fetcher — used by useSWR hooks across the app
+export const swrFetcher = (url: string) => api.get(url).then(r => r.data);
+
 // Dashboard
 export const fetchKPIs = (ticker: string) =>
   api.get(`/api/dashboard/kpis`, { params: { ticker } }).then(r => r.data);

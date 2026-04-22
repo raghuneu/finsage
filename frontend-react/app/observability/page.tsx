@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Card,
@@ -30,15 +30,8 @@ import {
   Legend,
   Cell,
 } from 'recharts';
-import {
-  fetchHealthChecks,
-  fetchPipelineRuns,
-  fetchPipelineSummary,
-  fetchDataQuality,
-  fetchLLMCalls,
-  fetchLLMSummary,
-  fetchQueryAttribution,
-} from '@/lib/api';
+import useSWR from 'swr';
+import { swrFetcher } from '@/lib/api';
 import SectionHeader from '@/components/SectionHeader';
 import MetricCard from '@/components/MetricCard';
 import { ChartSkeleton } from '@/components/LoadingSkeleton';
@@ -89,20 +82,16 @@ function StatusChip({ status }: { status: string }) {
 
 // ── Health Overview Tab ──────────────────────────────────────
 function HealthTab() {
-  const [checks, setChecks] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: checks, isLoading } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/health-checks', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    fetchHealthChecks()
-      .then(setChecks)
-      .catch(() => setChecks([]))
-      .finally(() => setLoading(false));
-  }, []);
+  if (isLoading) return <ChartSkeleton />;
 
-  if (loading) return <ChartSkeleton />;
-
-  const healthyCount = checks.filter((c) => (c.STATUS as string) === 'HEALTHY').length;
-  const total = checks.length;
+  const rows = checks || [];
+  const healthyCount = rows.filter((c) => (c.STATUS as string) === 'HEALTHY').length;
+  const total = rows.length;
 
   return (
     <Box>
@@ -150,7 +139,7 @@ function HealthTab() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {checks.map((c, i) => (
+              {rows.map((c, i) => (
                 <TableRow key={i}>
                   <TableCell sx={{ fontSize: '0.8rem', fontWeight: 600 }}>{c.COMPONENT as string}</TableCell>
                   <TableCell><StatusChip status={c.STATUS as string} /></TableCell>
@@ -160,7 +149,7 @@ function HealthTab() {
                   </TableCell>
                 </TableRow>
               ))}
-              {checks.length === 0 && (
+              {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} sx={{ textAlign: 'center', py: 4, color: COLORS.muted }}>
                     No health check data yet. The scheduled task runs every 60 minutes.
@@ -177,33 +166,33 @@ function HealthTab() {
 
 // ── Pipeline Runs Tab ────────────────────────────────────────
 function PipelineTab() {
-  const [runs, setRuns] = useState<Record<string, unknown>[]>([]);
-  const [summary, setSummary] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: runs } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/pipeline-runs?limit=100', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
+  const { data: summary, isLoading } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/pipeline-runs/summary', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    Promise.all([fetchPipelineRuns(100), fetchPipelineSummary()])
-      .then(([r, s]) => { setRuns(r); setSummary(s); })
-      .catch(() => { setRuns([]); setSummary([]); })
-      .finally(() => setLoading(false));
-  }, []);
+  if (isLoading) return <ChartSkeleton />;
 
-  if (loading) return <ChartSkeleton />;
-
-  const successCount = runs.filter((r) => (r.STATUS as string) === 'SUCCESS').length;
-  const failCount = runs.filter((r) => (r.STATUS as string) === 'FAILED').length;
-  const inProgressCount = runs.filter((r) => {
+  const rows = runs || [];
+  const summaryRows = summary || [];
+  const successCount = rows.filter((r) => (r.STATUS as string) === 'SUCCESS').length;
+  const failCount = rows.filter((r) => (r.STATUS as string) === 'FAILED').length;
+  const inProgressCount = rows.filter((r) => {
     const s = (r.STATUS as string || '').toUpperCase();
     return s === 'STARTED' || s === 'RUNNING' || s === 'IN_PROGRESS' || s === 'PENDING';
   }).length;
-  const completedRuns = runs.filter((r) => Number(r.DURATION_SECONDS) > 0);
+  const completedRuns = rows.filter((r) => Number(r.DURATION_SECONDS) > 0);
   const avgDuration = completedRuns.length > 0
     ? (completedRuns.reduce((a, r) => a + Number(r.DURATION_SECONDS), 0) / completedRuns.length).toFixed(1)
     : '0';
 
   return (
     <Box>
-      <SectionHeader title="Pipeline Runs" subtitle="Stage-level execution tracking across all pipelines" accentColor={failCount > 0 ? COLORS.down : runs.length > 0 ? COLORS.healthy : undefined} />
+      <SectionHeader title="Pipeline Runs" subtitle="Stage-level execution tracking across all pipelines" accentColor={failCount > 0 ? COLORS.down : rows.length > 0 ? COLORS.healthy : undefined} />
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 6, md: 3 }}>
           <MetricCard title="Succeeded" value={String(successCount)} color={COLORS.healthy} />
@@ -220,20 +209,20 @@ function PipelineTab() {
       </Grid>
 
       {/* Summary chart */}
-      {summary.length > 0 && (
+      {summaryRows.length > 0 && (
         <Card sx={{ p: 2, mb: 3 }}>
           <Typography variant="body2" sx={{ color: COLORS.muted, mb: 2, fontSize: '0.8rem' }}>
             Stages by Pipeline Type (Last 7 Days)
           </Typography>
           <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={summary}>
+            <BarChart data={summaryRows}>
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
               <XAxis dataKey="PIPELINE_TYPE" tick={{ fill: COLORS.muted, fontSize: 11 }} />
               <YAxis tick={{ fill: COLORS.muted, fontSize: 11 }} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#2C2A25' }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Bar dataKey="STAGE_COUNT" name="Stages" radius={[4, 4, 0, 0]}>
-                {summary.map((entry, idx) => (
+                {summaryRows.map((entry, idx) => (
                   <Cell key={idx} fill={(entry.STATUS as string) === 'SUCCESS' ? COLORS.success : COLORS.failed} />
                 ))}
               </Bar>
@@ -256,7 +245,7 @@ function PipelineTab() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {runs.slice(0, 50).map((r, i) => (
+              {rows.slice(0, 50).map((r, i) => (
                 <TableRow key={i}>
                   <TableCell sx={{ fontSize: '0.72rem', fontFamily: 'monospace' }}>{(r.RUN_ID as string || '').slice(0, 8)}</TableCell>
                   <TableCell sx={{ fontSize: '0.78rem' }}>{r.PIPELINE_TYPE as string}</TableCell>
@@ -269,7 +258,7 @@ function PipelineTab() {
                   </TableCell>
                 </TableRow>
               ))}
-              {runs.length === 0 && (
+              {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: COLORS.muted }}>
                     No pipeline runs recorded yet. Run a data load or CAVM pipeline to generate data.
@@ -286,18 +275,15 @@ function PipelineTab() {
 
 // ── Data Quality Tab ─────────────────────────────────────────
 function QualityTab() {
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/data-quality?days=14', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    fetchDataQuality(14)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, []);
+  if (isLoading) return <ChartSkeleton />;
 
-  if (loading) return <ChartSkeleton />;
-  if (data.length === 0)
+  const rows = data || [];
+  if (rows.length === 0)
     return (
       <Box>
         <SectionHeader title="Data Quality" subtitle="Quality score trends across RAW tables" />
@@ -307,8 +293,8 @@ function QualityTab() {
       </Box>
     );
 
-  const tables = [...new Set(data.map((d) => d.TABLE_NAME as string))];
-  const chartData = data.reduce<Record<string, Record<string, unknown>>>((acc, d) => {
+  const tables = [...new Set(rows.map((d) => d.TABLE_NAME as string))];
+  const chartData = rows.reduce<Record<string, Record<string, unknown>>>((acc, d) => {
     const date = d.SNAPSHOT_DATE as string;
     if (!acc[date]) acc[date] = { date };
     acc[date][d.TABLE_NAME as string] = Number(d.AVG_SCORE);
@@ -317,7 +303,7 @@ function QualityTab() {
   const lineData = Object.values(chartData).sort((a, b) => (a.date as string).localeCompare(b.date as string));
 
   const tableColors = ['#0382B7', '#03B792', '#1A9E60', '#E5A030', '#E58B6D'];
-  const overallAvg = data.reduce((a, d) => a + Number(d.AVG_SCORE), 0) / data.length;
+  const overallAvg = rows.reduce((a, d) => a + Number(d.AVG_SCORE), 0) / rows.length;
   const qualityColor = overallAvg >= 80 ? COLORS.healthy : overallAvg >= 60 ? COLORS.degraded : COLORS.down;
 
   return (
@@ -359,7 +345,7 @@ function QualityTab() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {data.slice(0, 20).map((d, i) => (
+              {rows.slice(0, 20).map((d, i) => (
                 <TableRow key={i}>
                   <TableCell sx={{ fontSize: '0.78rem', fontWeight: 600 }}>{(d.TABLE_NAME as string || '').replace('RAW_', '')}</TableCell>
                   <TableCell sx={{ fontSize: '0.78rem', fontWeight: 700, color: Number(d.AVG_SCORE) >= 70 ? COLORS.healthy : COLORS.degraded }}>
@@ -382,24 +368,24 @@ function QualityTab() {
 
 // ── LLM Calls Tab ────────────────────────────────────────────
 function LLMTab() {
-  const [calls, setCalls] = useState<Record<string, unknown>[]>([]);
-  const [summary, setSummary] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: calls } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/llm-calls?limit=100', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
+  const { data: summary, isLoading } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/llm-calls/summary', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    Promise.all([fetchLLMCalls(100), fetchLLMSummary()])
-      .then(([c, s]) => { setCalls(c); setSummary(s); })
-      .catch(() => { setCalls([]); setSummary([]); })
-      .finally(() => setLoading(false));
-  }, []);
+  if (isLoading) return <ChartSkeleton />;
 
-  if (loading) return <ChartSkeleton />;
-
-  const totalCalls = calls.length;
+  const rows = calls || [];
+  const summaryRows = summary || [];
+  const totalCalls = rows.length;
   const avgLatency = totalCalls > 0
-    ? Math.round(calls.reduce((a, c) => a + (Number(c.LATENCY_MS) || 0), 0) / totalCalls)
+    ? Math.round(rows.reduce((a, c) => a + (Number(c.LATENCY_MS) || 0), 0) / totalCalls)
     : 0;
-  const failures = calls.filter((c) => (c.STATUS as string) === 'FAILED').length;
+  const failures = rows.filter((c) => (c.STATUS as string) === 'FAILED').length;
 
   return (
     <Box>
@@ -415,18 +401,18 @@ function LLMTab() {
           <MetricCard title="Failures" value={String(failures)} color={failures > 0 ? COLORS.down : COLORS.healthy} />
         </Grid>
         <Grid size={{ xs: 6, md: 3 }}>
-          <MetricCard title="Models Used" value={String(summary.length)} color={COLORS.primary} />
+          <MetricCard title="Models Used" value={String(summaryRows.length)} color={COLORS.primary} />
         </Grid>
       </Grid>
 
       {/* Summary bar chart */}
-      {summary.length > 0 && (
+      {summaryRows.length > 0 && (
         <Card sx={{ p: 2, mb: 3 }}>
           <Typography variant="body2" sx={{ color: COLORS.muted, mb: 2, fontSize: '0.8rem' }}>
             Calls by Model (Last 7 Days)
           </Typography>
           <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={summary} layout="vertical">
+            <BarChart data={summaryRows} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
               <XAxis type="number" tick={{ fill: COLORS.muted, fontSize: 11 }} />
               <YAxis dataKey="MODEL_NAME" type="category" tick={{ fill: COLORS.muted, fontSize: 10 }} width={140} />
@@ -451,7 +437,7 @@ function LLMTab() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {calls.slice(0, 50).map((c, i) => (
+              {rows.slice(0, 50).map((c, i) => (
                 <TableRow key={i}>
                   <TableCell sx={{ fontSize: '0.75rem', fontWeight: 600 }}>{c.MODEL_NAME as string}</TableCell>
                   <TableCell sx={{ fontSize: '0.75rem' }}>{c.PROVIDER as string}</TableCell>
@@ -467,7 +453,7 @@ function LLMTab() {
                   </TableCell>
                 </TableRow>
               ))}
-              {calls.length === 0 && (
+              {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={8} sx={{ textAlign: 'center', py: 4, color: COLORS.muted }}>
                     No LLM calls recorded yet. Run a CAVM pipeline to generate data.
@@ -484,17 +470,14 @@ function LLMTab() {
 
 // ── Query Attribution Tab ────────────────────────────────────
 function QueryTab() {
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useSWR<Record<string, unknown>[]>(
+    '/api/observability/query-attribution', swrFetcher,
+    { dedupingInterval: 60000 }
+  );
 
-  useEffect(() => {
-    fetchQueryAttribution()
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, []);
+  if (isLoading) return <ChartSkeleton />;
 
-  if (loading) return <ChartSkeleton />;
+  const rows = data || [];
 
   const barColors = ['#0382B7', '#03B792', '#1A9E60', '#E5A030', '#E58B6D', '#6B6760'];
 
@@ -502,17 +485,17 @@ function QueryTab() {
     <Box>
       <SectionHeader title="Query Attribution" subtitle="Snowflake query breakdown by FinSage component (last 24h)" />
 
-      {data.length > 0 ? (
+      {rows.length > 0 ? (
         <>
           <Card sx={{ p: 2, mb: 3 }}>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data}>
+              <BarChart data={rows}>
                 <CartesianGrid strokeDasharray="3 3" stroke={COLORS.grid} />
                 <XAxis dataKey="COMPONENT" tick={{ fill: COLORS.muted, fontSize: 11 }} />
                 <YAxis tick={{ fill: COLORS.muted, fontSize: 11 }} />
                 <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: '#2C2A25' }} />
                 <Bar dataKey="QUERY_COUNT" name="Queries" radius={[4, 4, 0, 0]}>
-                  {data.map((_, idx) => (
+                  {rows.map((_, idx) => (
                     <Cell key={idx} fill={barColors[idx % barColors.length]} />
                   ))}
                 </Bar>
@@ -531,7 +514,7 @@ function QueryTab() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {data.map((d, i) => (
+                  {rows.map((d, i) => (
                     <TableRow key={i}>
                       <TableCell sx={{ fontSize: '0.8rem', fontWeight: 600 }}>{d.COMPONENT as string}</TableCell>
                       <TableCell sx={{ fontSize: '0.8rem' }}>{Number(d.QUERY_COUNT).toLocaleString()}</TableCell>
