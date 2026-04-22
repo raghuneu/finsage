@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Box,
   Card,
@@ -15,15 +15,18 @@ import {
   Link as MuiLink,
 } from '@mui/material';
 import CircleIcon from '@mui/icons-material/Circle';
+import dynamic from 'next/dynamic';
+import useSWR from 'swr';
 import { useTicker } from '@/lib/ticker-context';
-import { fetchKPIs, fetchPriceHistory, fetchHeadlines } from '@/lib/api';
+import { swrFetcher } from '@/lib/api';
 import MetricCard from '@/components/MetricCard';
 import SignalBadge from '@/components/SignalBadge';
 import SectionHeader from '@/components/SectionHeader';
-import PriceChart from '@/components/PriceChart';
 import { DashboardSkeleton } from '@/components/LoadingSkeleton';
 import { getSignalColor } from '@/lib/signal-colors';
 import NextLink from 'next/link';
+
+const PriceChart = dynamic(() => import('@/components/PriceChart'), { ssr: false });
 
 function fmtMoney(val: number | null | undefined): string {
   if (val == null) return 'N/A';
@@ -36,28 +39,22 @@ function fmtMoney(val: number | null | undefined): string {
 
 export default function DashboardPage() {
   const { ticker } = useTicker();
-  const [kpis, setKpis] = useState<Record<string, unknown> | null>(null);
-  const [priceData, setPriceData] = useState<unknown[]>([]);
-  const [headlines, setHeadlines] = useState<unknown[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      fetchKPIs(ticker),
-      fetchPriceHistory(ticker, 90),
-      fetchHeadlines(ticker, 10),
-    ])
-      .then(([k, p, h]) => {
-        setKpis(k);
-        setPriceData(p);
-        setHeadlines(h);
-      })
-      .catch((e) => setError(e.message || 'Failed to load dashboard data'))
-      .finally(() => setLoading(false));
-  }, [ticker]);
+  const { data: kpis, error: kpiErr, isLoading: kpiLoading } = useSWR(
+    `/api/dashboard/kpis?ticker=${ticker}`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
+  const { data: priceData } = useSWR(
+    `/api/dashboard/price-history?ticker=${ticker}&days=90`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
+  const { data: headlines } = useSWR(
+    `/api/dashboard/headlines?ticker=${ticker}&limit=10`, swrFetcher,
+    { dedupingInterval: 60000 }
+  );
+
+  const loading = kpiLoading;
+  const error = kpiErr?.message || null;
 
   if (loading) return <DashboardSkeleton />;
   if (error) return <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>;
@@ -192,8 +189,8 @@ export default function DashboardPage() {
       {/* Price Chart */}
       <SectionHeader title="Price History" subtitle="Last 90 trading days with moving averages" accentColor={getSignalColor(stock.trend_signal as string)} />
       <Card sx={{ mb: 3, p: 2 }}>
-        {(priceData as unknown[]).length > 0 ? (
-          <PriceChart data={priceData as never[]} height={450} />
+        {(priceData as unknown[] || []).length > 0 ? (
+          <PriceChart data={(priceData || []) as never[]} height={450} />
         ) : (
           <Typography variant="body2" sx={{ textAlign: 'center', py: 4, color: '#6B6760' }}>
             No price history available for this ticker.
@@ -206,13 +203,13 @@ export default function DashboardPage() {
       {/* Headlines */}
       <SectionHeader title="Recent Headlines" subtitle="Latest news articles from the data pipeline" accentColor={getSignalColor(sentiment.sentiment_label as string)} />
       <Card>
-        {(headlines as unknown[]).length > 0 ? (
+        {((headlines as unknown[]) || []).length > 0 ? (
           <List disablePadding>
-            {(headlines as Array<{ title: string; published_at: string; source_name: string }>).map(
+            {((headlines || []) as Array<{ title: string; published_at: string; source_name: string }>).map(
               (h, i) => (
                 <ListItem
                   key={i}
-                  divider={i < headlines.length - 1}
+                  divider={i < (headlines || []).length - 1}
                   sx={{
                     borderColor: '#E8E4DB',
                     py: 1.5,

@@ -11,6 +11,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  experimental: {
+    optimizePackageImports: [
+      '@mui/material',
+      '@mui/icons-material',
+      'recharts',
+    ],
+  },
 };
 
 export default nextConfig;
