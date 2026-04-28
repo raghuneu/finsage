@@ -33,13 +33,13 @@ BATCH_DELAYS = {
     'default': 5,    # yfinance, SEC EDGAR — shorter courtesy delay
 }
 # Per-table minimum ticker coverage for the loader gate.
-# SEC filings are sparse (companies file quarterly), so we use a 7-day lookback
+# SEC filings are sparse (companies file quarterly), so we use a 14-day lookback
 # window instead of daily, while keeping daily checks for the other sources.
 MIN_TICKER_COVERAGE = {
     'RAW.RAW_STOCK_PRICES':  {'min_tickers': 25, 'lookback_days': 0},
     'RAW.RAW_FUNDAMENTALS':  {'min_tickers': 25, 'lookback_days': 0},
     'RAW.RAW_NEWS':          {'min_tickers': 15, 'lookback_days': 0},
-    'RAW.RAW_SEC_FILINGS':   {'min_tickers': 25, 'lookback_days': 7},
+    'RAW.RAW_SEC_FILINGS':   {'min_tickers': 25, 'lookback_days': 14},
 }
 
 
